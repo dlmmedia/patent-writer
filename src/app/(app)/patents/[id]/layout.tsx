@@ -40,7 +40,7 @@ export default async function PatentLayout({
   ];
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-w-0">
       <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="px-6 pt-4 pb-0">
           <div className="flex items-center justify-between mb-3">
@@ -62,7 +62,7 @@ export default async function PatentLayout({
           <PatentNav tabs={tabs} />
         </div>
       </div>
-      <div className="flex-1 relative min-h-0">{children}</div>
+      <div className="flex-1 relative min-h-0 min-w-0 overflow-hidden">{children}</div>
     </div>
   );
 }
