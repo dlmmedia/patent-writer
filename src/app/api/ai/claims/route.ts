@@ -15,7 +15,7 @@ const claimSchema = z.object({
         "computer_readable_medium",
       ]),
       isIndependent: z.boolean(),
-      parentClaimNumber: z.number().optional(),
+      parentClaimNumber: z.number().nullable(),
       transitionalPhrase: z.enum([
         "comprising",
         "consisting of",
