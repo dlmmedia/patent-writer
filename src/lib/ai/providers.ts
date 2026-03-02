@@ -19,7 +19,9 @@ export const models = {
 } as const;
 
 export const imageModels = {
-  "imagen-3": google.image("imagen-3.0-generate-002"),
+  "gemini-3-pro-image": google.image("gemini-3-pro-image-preview"),
+  "gemini-2.5-flash-image": google.image("gemini-2.5-flash-image"),
+  "imagen-4": google.image("imagen-4.0-generate-001"),
   "gpt-image-1": openai.image("gpt-image-1"),
 } as const;
 
@@ -72,10 +74,20 @@ export const imageModelInfo: Record<
   ImageModelId,
   { name: string; provider: string; bestFor: string }
 > = {
-  "imagen-3": {
-    name: "Imagen 3",
+  "gemini-3-pro-image": {
+    name: "Gemini 3 Pro Image",
     provider: "Google",
-    bestFor: "Cost-effective patent drawings",
+    bestFor: "High-quality drawings with up to 4K resolution",
+  },
+  "gemini-2.5-flash-image": {
+    name: "Gemini 2.5 Flash Image",
+    provider: "Google",
+    bestFor: "Fast, cost-effective patent drawings",
+  },
+  "imagen-4": {
+    name: "Imagen 4",
+    provider: "Google",
+    bestFor: "Photorealistic image generation",
   },
   "gpt-image-1": {
     name: "GPT Image 1",

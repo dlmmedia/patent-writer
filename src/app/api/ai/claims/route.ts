@@ -13,6 +13,7 @@ const claimSchema = z.object({
         "apparatus",
         "composition",
         "computer_readable_medium",
+        "means_plus_function",
       ]),
       isIndependent: z.boolean(),
       parentClaimNumber: z.number().nullable(),
@@ -47,10 +48,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const modelId = model as ModelId;
+    const modelId = (model || "gpt-5.2") as ModelId;
     if (!(modelId in models)) {
       return Response.json(
         { error: `Invalid model "${model}". Valid models: ${Object.keys(models).join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    const isOpenAI = modelId.startsWith("gpt") || modelId === "o3";
+    const isGoogle = modelId.startsWith("gemini");
+    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OpenAI API key is not configured. Go to Settings to check your API keys." },
+        { status: 400 }
+      );
+    }
+    if (isGoogle && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      return Response.json(
+        { error: "Google AI API key is not configured. Go to Settings to check your API keys." },
         { status: 400 }
       );
     }

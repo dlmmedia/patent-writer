@@ -12,7 +12,7 @@ export default async function ClaimsPage({
   if (!patent) notFound();
 
   return (
-    <div className="absolute inset-0">
+    <div className="flex h-full w-full min-h-0 min-w-0 overflow-hidden">
       <ClaimsBuilderClient patent={patent} />
     </div>
   );

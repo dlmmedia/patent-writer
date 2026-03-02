@@ -85,13 +85,13 @@ const PRESETS: Record<string, { drafting: ModelId; claims: ModelId; analysis: Mo
     drafting: "gemini-2.5-flash",
     claims: "gpt-5-mini",
     analysis: "gemini-2.5-flash",
-    image: "imagen-3",
+    image: "gemini-2.5-flash-image",
   },
   balanced: {
     drafting: "gpt-5-mini",
     claims: "o3",
     analysis: "gemini-2.5-pro",
-    image: "imagen-3",
+    image: "gemini-3-pro-image",
   },
   premium: {
     drafting: "gpt-5.2",
@@ -120,7 +120,7 @@ export function ConfigClient({ patent }: { patent: Patent }) {
     draftingModel: "gemini-2.5-flash",
     claimsModel: "gpt-5.2",
     analysisModel: "gemini-2.5-pro",
-    imageModel: "imagen-3",
+    imageModel: "gemini-3-pro-image",
   };
 
   const form = useForm<ConfigFormValues>({

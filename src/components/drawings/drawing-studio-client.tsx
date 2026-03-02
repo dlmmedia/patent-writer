@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import type { Patent, PatentDrawing, ReferenceNumeral } from "@/lib/types";
-import { createReferenceNumeral } from "@/lib/actions/patents";
+import { createReferenceNumeral, createDrawing, updateDrawing } from "@/lib/actions/patents";
 import {
   Card,
   CardContent,
@@ -66,7 +66,7 @@ const DRAWING_TYPE_LABELS: Record<DrawingType, string> = {
   perspective_view: "Perspective View",
 };
 
-type ImageModelId = "imagen-3" | "gpt-image-1";
+type ImageModelId = "gemini-3-pro-image" | "gemini-2.5-flash-image" | "imagen-4" | "gpt-image-1";
 
 interface PlacedNumeral {
   id: string;
@@ -101,7 +101,7 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
   // AI generation state
   const [generateOpen, setGenerateOpen] = useState(false);
   const [genDescription, setGenDescription] = useState("");
-  const [genModel, setGenModel] = useState<ImageModelId>("imagen-3");
+  const [genModel, setGenModel] = useState<ImageModelId>("gemini-3-pro-image");
   const [genType, setGenType] = useState<DrawingType>("block_diagram");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -186,36 +186,41 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
     }
   }, [genDescription, genModel, genType]);
 
-  const handleAcceptGenerated = useCallback(() => {
+  const [isAccepting, setIsAccepting] = useState(false);
+
+  const handleAcceptGenerated = useCallback(async () => {
     if (!generatedImage) return;
 
+    setIsAccepting(true);
     const figNum = nextFigureNumber();
-    const newDrawing: PatentDrawing = {
-      id: crypto.randomUUID(),
-      patentId: patent.id,
-      figureNumber: figNum,
-      figureLabel: genDescription.slice(0, 80),
-      description: genDescription,
-      originalUrl: generatedImage,
-      processedUrl: null,
-      thumbnailUrl: null,
-      annotations: { numerals: [], arrows: [] },
-      generationPrompt: genDescription,
-      generationModel: genModel,
-      width: 1024,
-      height: 1024,
-      dpi: 300,
-      isCompliant: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
 
-    setDrawings((prev) => [...prev, newDrawing]);
-    setGenerateOpen(false);
-    setGeneratedImage(null);
-    setGenDescription("");
-    handleSelectDrawing(newDrawing);
-    toast.success(`FIG. ${figNum} added to drawings.`);
+    try {
+      const saved = await createDrawing({
+        patentId: patent.id,
+        figureNumber: figNum,
+        figureLabel: genDescription.slice(0, 80),
+        description: genDescription,
+        originalUrl: generatedImage,
+        annotations: { numerals: [], arrows: [] },
+        generationPrompt: genDescription,
+        generationModel: genModel,
+        width: 1024,
+        height: 1024,
+        dpi: 300,
+        isCompliant: false,
+      });
+
+      setDrawings((prev) => [...prev, saved]);
+      setGenerateOpen(false);
+      setGeneratedImage(null);
+      setGenDescription("");
+      handleSelectDrawing(saved);
+      toast.success(`FIG. ${figNum} saved to patent.`);
+    } catch {
+      toast.error("Failed to save drawing.");
+    } finally {
+      setIsAccepting(false);
+    }
   }, [
     generatedImage,
     genDescription,
@@ -300,43 +305,41 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
     [selectedDrawing]
   );
 
-  const handleSaveDrawingDetails = useCallback(() => {
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+
+  const handleSaveDrawingDetails = useCallback(async () => {
     if (!selectedDrawing) return;
 
-    setDrawings((prev) =>
-      prev.map((d) =>
-        d.id === selectedDrawing.id
-          ? {
-              ...d,
-              figureNumber: editFigureNumber,
-              figureLabel: editFigureLabel,
-              description: editDescription,
-              annotations: {
-                numerals: placedNumerals.map((p) => ({
-                  id: p.id,
-                  numeral: p.numeral,
-                  x: p.xPercent,
-                  y: p.yPercent,
-                  elementName: p.elementName,
-                })),
-                arrows:
-                  selectedDrawing.annotations?.arrows ?? [],
-              },
-            }
-          : d
-      )
-    );
-    setSelectedDrawing((prev) =>
-      prev
-        ? {
-            ...prev,
-            figureNumber: editFigureNumber,
-            figureLabel: editFigureLabel,
-            description: editDescription,
-          }
-        : null
-    );
-    toast.success("Drawing details saved.");
+    setIsSavingDetails(true);
+    const annotations = {
+      numerals: placedNumerals.map((p) => ({
+        id: p.id,
+        numeral: p.numeral,
+        x: p.xPercent,
+        y: p.yPercent,
+        elementName: p.elementName,
+      })),
+      arrows: selectedDrawing.annotations?.arrows ?? [],
+    };
+
+    try {
+      const updated = await updateDrawing(selectedDrawing.id, {
+        figureNumber: editFigureNumber,
+        figureLabel: editFigureLabel,
+        description: editDescription,
+        annotations,
+      });
+
+      setDrawings((prev) =>
+        prev.map((d) => (d.id === updated.id ? updated : d))
+      );
+      setSelectedDrawing(updated);
+      toast.success("Drawing details saved.");
+    } catch {
+      toast.error("Failed to save drawing details.");
+    } finally {
+      setIsSavingDetails(false);
+    }
   }, [
     selectedDrawing,
     editFigureNumber,
@@ -418,9 +421,15 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="imagen-3">Imagen 3</SelectItem>
+                        <SelectItem value="gemini-3-pro-image">
+                          Gemini 3 Pro Image
+                        </SelectItem>
+                        <SelectItem value="gemini-2.5-flash-image">
+                          Gemini 2.5 Flash Image
+                        </SelectItem>
+                        <SelectItem value="imagen-4">Imagen 4</SelectItem>
                         <SelectItem value="gpt-image-1">
-                          GPT-image-1
+                          GPT Image 1
                         </SelectItem>
                       </SelectContent>
                     </Select>
@@ -487,9 +496,14 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                     <Button
                       className="flex-1"
                       onClick={handleAcceptGenerated}
+                      disabled={isAccepting}
                     >
-                      <Check className="h-4 w-4 mr-2" />
-                      Accept &amp; Process
+                      {isAccepting ? (
+                        <Wand2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4 mr-2" />
+                      )}
+                      {isAccepting ? "Saving..." : "Accept & Save"}
                     </Button>
                   </div>
                 ) : (
@@ -587,7 +601,7 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
 
       {/* Drawing Workspace */}
       {selectedDrawing && (
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="grid gap-6 lg:grid-cols-[1fr_360px] min-w-0">
           {/* Main image viewer with annotation overlay */}
           <Card>
             <CardHeader className="pb-3">
@@ -720,9 +734,14 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                   size="sm"
                   className="w-full"
                   onClick={handleSaveDrawingDetails}
+                  disabled={isSavingDetails}
                 >
-                  <Check className="h-4 w-4 mr-1" />
-                  Save Details
+                  {isSavingDetails ? (
+                    <Wand2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4 mr-1" />
+                  )}
+                  {isSavingDetails ? "Saving..." : "Save Details"}
                 </Button>
               </CardContent>
             </Card>

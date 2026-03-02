@@ -17,54 +17,216 @@ interface SearchRequest {
   patentId?: string;
 }
 
-// ─── PatentsView (USPTO, free, no auth) ─────────────────────
+// ─── PatentsView (USPTO PatentSearch API, requires API key) ──
+
+async function readErrorBody(res: Response): Promise<string> {
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    try {
+      const json = await res.json();
+      return JSON.stringify(json).slice(0, 300);
+    } catch {
+      return "Unable to parse JSON error body";
+    }
+  }
+
+  try {
+    return (await res.text()).slice(0, 300);
+  } catch {
+    return "Unable to read error body";
+  }
+}
+
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  attempts = 2
+): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      lastError = error;
+      const isAbort =
+        error instanceof Error &&
+        (error.name === "AbortError" ||
+          error.message.toLowerCase().includes("aborted"));
+      if (!isAbort || attempt === attempts) break;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
+
+function getUsptoDataApiKey(): string | null {
+  return (
+    process.env.USPTO_API_KEY?.trim() ||
+    process.env.USPTO_ODP_API_KEY?.trim() ||
+    process.env.PATENTSVIEW_API_KEY?.trim() ||
+    null
+  );
+}
+
+async function searchUsptoData(query: string): Promise<SearchResult[]> {
+  const apiKey = getUsptoDataApiKey();
+  if (!apiKey) {
+    throw new Error(
+      "USPTO data API key not configured (set USPTO_API_KEY or USPTO_ODP_API_KEY)"
+    );
+  }
+
+  const url = "https://api.uspto.gov/api/v1/patent/applications/search";
+  let res: Response;
+  try {
+    res = await fetchWithRetry(
+      `${url}?q=${encodeURIComponent(query)}&offset=0&limit=25`,
+      {
+        method: "GET",
+        headers: {
+          "X-API-KEY": apiKey,
+        },
+        signal: AbortSignal.timeout(30_000),
+      },
+      2
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(`USPTO data request timed out or failed: ${message}`);
+  }
+
+  if (!res.ok) {
+    const errorBody = await readErrorBody(res);
+    throw new Error(
+      `USPTO data search failed (${res.status}): ${errorBody || "No response body"}`
+    );
+  }
+
+  type UsptoBagItem = {
+    applicationNumberText?: string;
+    applicationMetaData?: {
+      inventionTitle?: string;
+      filingDate?: string;
+      effectiveFilingDate?: string;
+    };
+    assignmentBag?: Array<{
+      assigneeBag?: Array<{ assigneeNameText?: string }>;
+    }>;
+  };
+
+  const data = await res.json();
+  const items: UsptoBagItem[] = Array.isArray(data?.patentFileWrapperDataBag)
+    ? data.patentFileWrapperDataBag
+    : [];
+
+  return items
+    .map((item) => {
+      const appNo = item.applicationNumberText?.trim();
+      if (!appNo) return null;
+
+      const title = item.applicationMetaData?.inventionTitle?.trim() || "Untitled";
+      const filingDate =
+        item.applicationMetaData?.filingDate ||
+        item.applicationMetaData?.effectiveFilingDate ||
+        "";
+      const assignee =
+        item.assignmentBag?.[0]?.assigneeBag?.[0]?.assigneeNameText?.trim() ||
+        "Unknown";
+
+      return {
+        id: `uspto-${appNo}`,
+        patentNumber: appNo,
+        title,
+        abstract: "",
+        assignee,
+        filingDate,
+        sourceApi: "patentsview",
+        externalUrl: `https://patentcenter.uspto.gov/applications/${encodeURIComponent(appNo)}`,
+      } satisfies SearchResult;
+    })
+    .filter((result): result is SearchResult => result !== null);
+}
 
 async function searchPatentsView(query: string): Promise<SearchResult[]> {
-  const url = "https://api.patentsview.org/patents/query";
+  const apiKey = process.env.PATENTSVIEW_API_KEY?.trim();
+  if (!apiKey) {
+    return searchUsptoData(query);
+  }
+
+  const url = "https://search.patentsview.org/api/v1/patent/";
   const body = {
-    q: { _text_any: { patent_abstract: query } },
+    q: {
+      _or: [
+        { _text_any: { patent_title: query } },
+        { _text_any: { patent_abstract: query } },
+      ],
+    },
     f: [
-      "patent_number",
+      "patent_id",
       "patent_title",
       "patent_abstract",
       "patent_date",
-      "assignee_organization",
+      "assignees.assignee_organization",
     ],
-    o: { per_page: 25 },
+    o: { size: 25 },
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15_000),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithRetry(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Api-Key": apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      },
+      2
+    );
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    throw new Error(`PatentsView request timed out or failed: ${message}`);
+  }
 
   if (!res.ok) {
-    console.error(`PatentsView returned ${res.status}`);
-    return [];
+    const errorBody = await readErrorBody(res);
+    if (res.status === 403) {
+      // If this key is actually a USPTO data key, use USPTO ODP search instead.
+      return searchUsptoData(query);
+    }
+    throw new Error(
+      `PatentsView search failed (${res.status}): ${errorBody || "No response body"}`
+    );
   }
 
   const data = await res.json();
-  if (!data.patents) return [];
+  const patents = Array.isArray(data?.patents)
+    ? data.patents
+    : Array.isArray(data?.data)
+      ? data.data
+      : [];
+  if (patents.length === 0) return [];
 
-  return data.patents.map(
+  return patents.map(
     (p: {
-      patent_number: string;
+      patent_id: string;
       patent_title: string;
       patent_abstract: string;
       patent_date: string;
       assignees?: { assignee_organization: string }[];
     }) => ({
-      id: `pv-${p.patent_number}`,
-      patentNumber: `US${p.patent_number}`,
+      id: `pv-${p.patent_id}`,
+      patentNumber: `US${p.patent_id}`,
       title: p.patent_title || "Untitled",
       abstract: p.patent_abstract || "",
       assignee:
         p.assignees?.[0]?.assignee_organization || "Unknown",
       filingDate: p.patent_date || "",
       sourceApi: "patentsview",
-      externalUrl: `https://patents.google.com/patent/US${p.patent_number}`,
+      externalUrl: `https://patents.google.com/patent/US${p.patent_id}`,
     })
   );
 }
@@ -108,12 +270,12 @@ function extractTextFromXmlTag(xml: string, tag: string): string {
   return match ? match[1].replace(/<[^>]+>/g, "").trim() : "";
 }
 
-function extractAllFromXmlTag(xml: string, tag: string): string[] {
-  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "gi");
+function extractXmlBlocksByTag(xml: string, tag: string): string[] {
+  const regex = new RegExp(`<${tag}[^>]*>[\\s\\S]*?</${tag}>`, "gi");
   const results: string[] = [];
   let match;
   while ((match = regex.exec(xml)) !== null) {
-    results.push(match[1].replace(/<[^>]+>/g, "").trim());
+    results.push(match[0]);
   }
   return results;
 }
@@ -132,13 +294,15 @@ async function searchEpo(query: string): Promise<SearchResult[]> {
   });
 
   if (!res.ok) {
-    console.error(`EPO search returned ${res.status}`);
-    return [];
+    const errorBody = await readErrorBody(res);
+    throw new Error(
+      `EPO search failed (${res.status}): ${errorBody || "No response body"}`
+    );
   }
 
   const xml = await res.text();
 
-  const docIds = extractAllFromXmlTag(xml, "document-id");
+  const docIds = extractXmlBlocksByTag(xml, "document-id");
   const results: SearchResult[] = [];
 
   for (const docBlock of docIds.slice(0, 25)) {
@@ -201,9 +365,27 @@ export async function POST(req: Request) {
       );
     }
 
-    const activeSources = (sources ?? Object.keys(searchFunctions)).filter(
-      (s) => s in searchFunctions
-    );
+    if (Array.isArray(sources) && sources.length === 0) {
+      return NextResponse.json(
+        { error: "At least one source must be selected" },
+        { status: 400 }
+      );
+    }
+
+    const requestedSources = Array.isArray(sources)
+      ? sources
+      : Object.keys(searchFunctions);
+    const activeSources = requestedSources.filter((s) => s in searchFunctions);
+
+    if (activeSources.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "No valid search sources selected. Supported sources: patentsview, epo",
+        },
+        { status: 400 }
+      );
+    }
 
     const settled = await Promise.allSettled(
       activeSources.map((src) => searchFunctions[src](query.trim()))

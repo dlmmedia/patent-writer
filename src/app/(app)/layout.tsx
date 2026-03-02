@@ -30,7 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </kbd>
           </div>
         </header>
-        <div className="relative flex-1 min-h-0 min-w-0">{children}</div>
+        <div className="relative flex-1 min-h-0 min-w-0 w-full overflow-hidden">{children}</div>
       </SidebarInset>
       <CommandPalette />
     </>

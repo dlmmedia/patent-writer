@@ -111,7 +111,7 @@ const RISK_CONFIG: Record<RiskLevel, { label: string; className: string }> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  patentsview: "USPTO (PatentsView)",
+  patentsview: "USPTO Data / PatentsView",
   epo: "EPO OPS",
 };
 
@@ -155,6 +155,8 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
     }))
   );
   const [searching, setSearching] = React.useState(false);
+  const [searchError, setSearchError] = React.useState<string | null>(null);
+  const [sourceErrors, setSourceErrors] = React.useState<string[]>([]);
   const [selectedResult, setSelectedResult] = React.useState<DisplayResult | null>(null);
   const [sheetOpen, setSheetOpen] = React.useState(false);
   const [sorting, setSorting] = React.useState<SortingState>([]);
@@ -171,10 +173,17 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
   async function handleSearch() {
     if (!query.trim()) return;
     setSearching(true);
+    setSearchError(null);
+    setSourceErrors([]);
 
     const sources: string[] = [];
     if (sourcePatentsView) sources.push("patentsview");
     if (sourceEpo) sources.push("epo");
+    if (sources.length === 0) {
+      setSearchError("Select at least one source before searching.");
+      setSearching(false);
+      return;
+    }
 
     try {
       const res = await fetch("/api/search", {
@@ -183,6 +192,11 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
         body: JSON.stringify({ query: query.trim(), sources, patentId: patent.id }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Search failed");
+      }
+
+      setSourceErrors(Array.isArray(data?.meta?.errors) ? data.meta.errors : []);
       if (data.results) {
         const mapped: DisplayResult[] = data.results.map(
           (r: SearchApiResult) => ({
@@ -192,7 +206,9 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
         );
         setResults(mapped);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Search failed";
+      setSearchError(message);
       console.error("Search failed:", err);
     } finally {
       setSearching(false);
@@ -499,18 +515,38 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
                 checked={sourcePatentsView}
-                onCheckedChange={(v) => setSourcePatentsView(v === true)}
+                onCheckedChange={(v) => {
+                  setSearchError(null);
+                  setSourcePatentsView(v === true);
+                }}
               />
-              <span className="text-sm">PatentsView (US)</span>
+              <span className="text-sm">USPTO Data / PatentsView</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
                 checked={sourceEpo}
-                onCheckedChange={(v) => setSourceEpo(v === true)}
+                onCheckedChange={(v) => {
+                  setSearchError(null);
+                  setSourceEpo(v === true);
+                }}
               />
               <span className="text-sm">EPO OPS (Worldwide)</span>
             </label>
           </div>
+          {searchError && (
+            <p className="mt-3 text-sm text-destructive">{searchError}</p>
+          )}
+          {sourceErrors.length > 0 && (
+            <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+              <ul className="space-y-1">
+                {sourceErrors.map((msg) => (
+                  <li key={msg} className="text-xs text-destructive">
+                    {msg}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -535,7 +571,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                 className="text-xs border rounded-md px-2 py-1 bg-background"
               >
                 <option value="all">All Sources</option>
-                <option value="patentsview">USPTO (PatentsView)</option>
+                <option value="patentsview">USPTO Data / PatentsView</option>
                 <option value="epo">EPO OPS</option>
               </select>
             </div>

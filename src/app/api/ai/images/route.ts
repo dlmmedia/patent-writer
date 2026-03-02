@@ -1,5 +1,7 @@
-import { experimental_generateImage as generateImage } from "ai";
+import { generateImage } from "ai";
 import { getImageModel, type ImageModelId, imageModels } from "@/lib/ai/providers";
+
+const GOOGLE_MODELS: ImageModelId[] = ["gemini-3-pro-image", "gemini-2.5-flash-image", "imagen-4"];
 
 export async function POST(req: Request) {
   try {
@@ -12,7 +14,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const modelId = (model || "gpt-image-1") as ImageModelId;
+    const modelId = (model || "gemini-3-pro-image") as ImageModelId;
     if (!(modelId in imageModels)) {
       return Response.json(
         { error: `Invalid image model "${model}". Valid models: ${Object.keys(imageModels).join(", ")}` },
@@ -20,13 +22,38 @@ export async function POST(req: Request) {
       );
     }
 
+    const isOpenAI = modelId === "gpt-image-1";
+    const isGoogle = GOOGLE_MODELS.includes(modelId);
+
+    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OpenAI API key is not configured. Go to Settings to check your API keys." },
+        { status: 400 }
+      );
+    }
+    if (isGoogle && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      return Response.json(
+        { error: "Google AI API key is not configured. Go to Settings to check your API keys." },
+        { status: 400 }
+      );
+    }
+
     const imageModel = getImageModel(modelId);
 
-    const { image } = await generateImage({
+    const fullPrompt = `Patent drawing in black and white line art style. Clean technical illustration with numbered reference elements. No shading or color. Precise engineering-style lines. ${prompt}`;
+
+    const generateOptions: Parameters<typeof generateImage>[0] = {
       model: imageModel,
-      prompt: `Patent drawing in black and white line art style. Clean technical illustration with numbered reference elements. No shading or color. Precise engineering-style lines. ${prompt}`,
-      size: "1024x1024",
-    });
+      prompt: fullPrompt,
+    };
+
+    if (isOpenAI) {
+      generateOptions.size = "1024x1024";
+    } else {
+      generateOptions.aspectRatio = "1:1";
+    }
+
+    const { image } = await generateImage(generateOptions);
 
     return Response.json({ image: image.base64 });
   } catch (error) {

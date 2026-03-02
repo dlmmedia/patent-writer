@@ -74,7 +74,7 @@ const MODEL_PRESETS = {
       draftingModel: "gemini-2.5-flash" as ModelId,
       claimsModel: "gpt-5-mini" as ModelId,
       analysisModel: "gemini-2.5-flash" as ModelId,
-      imageModel: "imagen-3" as ImageModelId,
+      imageModel: "gemini-2.5-flash-image" as ImageModelId,
     },
   },
   balanced: {
@@ -85,7 +85,7 @@ const MODEL_PRESETS = {
       draftingModel: "gpt-5.2" as ModelId,
       claimsModel: "gpt-5.2" as ModelId,
       analysisModel: "gemini-2.5-pro" as ModelId,
-      imageModel: "imagen-3" as ImageModelId,
+      imageModel: "gemini-3-pro-image" as ImageModelId,
     },
   },
   premium: {

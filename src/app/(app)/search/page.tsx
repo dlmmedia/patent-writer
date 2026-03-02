@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Card,
@@ -25,7 +26,9 @@ import {
   Globe,
   Building2,
   CalendarDays,
+  Loader2,
 } from "lucide-react";
+import { createPatent } from "@/lib/actions/patents";
 
 interface SearchResult {
   id: string;
@@ -59,17 +62,35 @@ async function fetchSearch(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, sources }),
   });
-  if (!res.ok) throw new Error("Search failed");
-  return res.json();
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || "Search failed");
+  return data;
 }
 
 export default function SearchPage() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [sources, setSources] = useState<string[]>(["patentsview", "epo"]);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [importingId, setImportingId] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
-  const { data, isLoading, isFetching } = useQuery<ApiResponse>({
+  function handleImport(result: SearchResult) {
+    setImportingId(result.id);
+    startTransition(async () => {
+      const patent = await createPatent({
+        title: result.title || "Untitled Patent",
+        type: "utility",
+        jurisdiction: result.sourceApi === "epo" ? "EP" : "US",
+        inventionDescription: result.abstract || undefined,
+      });
+      router.push(`/patents/${patent.id}`);
+    });
+  }
+
+  const { data, isLoading, isFetching, error } = useQuery<ApiResponse>({
     queryKey: ["patent-search", submittedQuery, sources],
     queryFn: () => fetchSearch(submittedQuery, sources),
     enabled: submittedQuery.length > 0,
@@ -78,13 +99,19 @@ export default function SearchPage() {
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
+    if (sources.length === 0) {
+      setFormError("Select at least one source before searching.");
+      return;
+    }
     if (query.trim()) {
+      setFormError(null);
       setSubmittedQuery(query.trim());
       setPage(1);
     }
   }
 
   function toggleSource(source: string) {
+    setFormError(null);
     setSources((prev) =>
       prev.includes(source)
         ? prev.filter((s) => s !== source)
@@ -125,7 +152,7 @@ export default function SearchPage() {
                   className="pl-10 h-12 text-base shadow-inner focus-gold"
                 />
               </div>
-              <Button type="submit" disabled={!query.trim() || isLoading} size="lg" className="h-12 px-6 btn-press legal-gradient text-white hover:opacity-90">
+              <Button type="submit" disabled={!query.trim() || isLoading || sources.length === 0} size="lg" className="h-12 px-6 btn-press legal-gradient text-white hover:opacity-90">
                 Search
               </Button>
             </div>
@@ -141,7 +168,7 @@ export default function SearchPage() {
                   onCheckedChange={() => toggleSource("patentsview")}
                 />
                 <Label htmlFor="src-pv" className="text-sm cursor-pointer">
-                  PatentsView (USPTO)
+                  USPTO Data / PatentsView
                 </Label>
               </div>
               <div className="flex items-center gap-2">
@@ -155,9 +182,20 @@ export default function SearchPage() {
                 </Label>
               </div>
             </div>
+            {formError && (
+              <p className="text-sm text-destructive">{formError}</p>
+            )}
           </form>
         </CardContent>
       </Card>
+
+      {error instanceof Error && (
+        <Card className="border-destructive/40 bg-destructive/5">
+          <CardContent className="pt-4">
+            <p className="text-sm text-destructive">{error.message}</p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Loading skeletons */}
       {isLoading && submittedQuery && (
@@ -200,6 +238,19 @@ export default function SearchPage() {
               </Badge>
             )}
           </div>
+          {data.meta.errors && data.meta.errors.length > 0 && (
+            <Card className="border-destructive/40 bg-destructive/5">
+              <CardContent className="pt-4">
+                <ul className="space-y-1">
+                  {data.meta.errors.map((msg) => (
+                    <li key={msg} className="text-xs text-destructive">
+                      {msg}
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="space-y-3">
             {paginatedResults.map((result) => (
@@ -258,9 +309,20 @@ export default function SearchPage() {
                         View
                       </a>
                     </Button>
-                    <Button variant="secondary" size="sm">
-                      <Import className="h-3 w-3 mr-1" />
-                      Import to New Patent
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={isPending && importingId === result.id}
+                      onClick={() => handleImport(result)}
+                    >
+                      {isPending && importingId === result.id ? (
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      ) : (
+                        <Import className="h-3 w-3 mr-1" />
+                      )}
+                      {isPending && importingId === result.id
+                        ? "Importing..."
+                        : "Import to New Patent"}
                     </Button>
                   </div>
                 </CardContent>

@@ -90,7 +90,7 @@ export const patents = pgTable("patents", {
     draftingModel: "gemini-2.5-flash",
     claimsModel: "gpt-5.2",
     analysisModel: "gemini-2.5-pro",
-    imageModel: "imagen-3",
+    imageModel: "gemini-3-pro-image",
   }),
   technologyArea: text("technology_area"),
   inventors: jsonb("inventors").$type<{ name: string; address?: string }[]>().default([]),

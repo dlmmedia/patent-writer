@@ -16,6 +16,7 @@ import type {
   NewPatent,
   NewPatentSection,
   NewPatentClaim,
+  NewPatentDrawing,
   SectionType,
   PatentType,
   Jurisdiction,
@@ -59,14 +60,19 @@ export async function createPatent(data: {
 
   const sectionsForType = getSectionsForPatentType(data.type);
   const sectionValues: NewPatentSection[] = sectionsForType.map(
-    (sectionType, index) => ({
-      patentId: patent.id,
-      sectionType,
-      title: SECTION_LABELS[sectionType],
-      orderIndex: index,
-      content: {},
-      plainText: "",
-    })
+    (sectionType, index) => {
+      const isTitle = sectionType === "title";
+      const initialText = isTitle ? data.title : "";
+      return {
+        patentId: patent.id,
+        sectionType,
+        title: SECTION_LABELS[sectionType],
+        orderIndex: index,
+        content: [{ type: "p", children: [{ text: initialText }] }] as unknown as Record<string, unknown>,
+        plainText: initialText,
+        wordCount: initialText ? initialText.split(/\s+/).filter(Boolean).length : 0,
+      };
+    }
   );
 
   if (sectionValues.length > 0) {
@@ -181,6 +187,29 @@ export async function getDrawings(patentId: string) {
     where: eq(patentDrawings.patentId, patentId),
     orderBy: [asc(patentDrawings.figureNumber)],
   });
+}
+
+export async function createDrawing(data: NewPatentDrawing) {
+  const [drawing] = await db.insert(patentDrawings).values(data).returning();
+  revalidatePath(`/patents/${data.patentId}/drawings`);
+  return drawing;
+}
+
+export async function updateDrawing(
+  id: string,
+  data: Partial<NewPatentDrawing>
+) {
+  const [updated] = await db
+    .update(patentDrawings)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(patentDrawings.id, id))
+    .returning();
+  return updated;
+}
+
+export async function deleteDrawing(id: string, patentId: string) {
+  await db.delete(patentDrawings).where(eq(patentDrawings.id, id));
+  revalidatePath(`/patents/${patentId}/drawings`);
 }
 
 export async function getReferenceNumerals(patentId: string) {

@@ -47,13 +47,17 @@ export default async function PatentOverviewPage({
     0
   );
 
+  const independentClaims = patent.claims.filter((c) => c.isIndependent);
+  const dependentClaims = patent.claims.filter((c) => !c.isIndependent);
+
   return (
-    <div className="p-6 space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="p-6 space-y-6 overflow-y-auto h-full">
+      {/* Stat Cards */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Sections</CardDescription>
-            <CardTitle className="text-2xl">
+            <CardTitle className="text-2xl tabular-nums">
               {completedSections}/{totalSections}
             </CardTitle>
           </CardHeader>
@@ -68,21 +72,24 @@ export default async function PatentOverviewPage({
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Claims</CardDescription>
-            <CardTitle className="text-2xl">{patent.claims.length}</CardTitle>
+            <CardTitle className="text-2xl tabular-nums">{patent.claims.length}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              {patent.claims.filter((c) => c.isIndependent).length} independent
-              {" / "}
-              {patent.claims.filter((c) => !c.isIndependent).length} dependent
-            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="outline" className="text-xs">
+                {independentClaims.length} independent
+              </Badge>
+              <Badge variant="secondary" className="text-xs">
+                {dependentClaims.length} dependent
+              </Badge>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Drawings</CardDescription>
-            <CardTitle className="text-2xl">
+            <CardTitle className="text-2xl tabular-nums">
               {patent.drawings.length}
             </CardTitle>
           </CardHeader>
@@ -96,7 +103,7 @@ export default async function PatentOverviewPage({
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Word Count</CardDescription>
-            <CardTitle className="text-2xl">
+            <CardTitle className="text-2xl tabular-nums">
               {totalWords.toLocaleString()}
             </CardTitle>
           </CardHeader>
@@ -108,6 +115,7 @@ export default async function PatentOverviewPage({
         </Card>
       </div>
 
+      {/* Sections + Details */}
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
@@ -124,20 +132,20 @@ export default async function PatentOverviewPage({
                 return (
                   <div
                     key={section.id}
-                    className="flex items-center justify-between"
+                    className="flex items-center justify-between gap-2"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       {hasContent ? (
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
                       ) : (
-                        <Circle className="h-4 w-4 text-muted-foreground" />
+                        <Circle className="h-4 w-4 text-muted-foreground shrink-0" />
                       )}
-                      <span className="text-sm">
+                      <span className="text-sm truncate">
                         {SECTION_LABELS[section.sectionType as SectionType] ??
                           section.title}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       {section.isAiGenerated && (
                         <Badge variant="secondary" className="text-xs">
                           AI
@@ -224,6 +232,65 @@ export default async function PatentOverviewPage({
           </Card>
         </div>
       </div>
+
+      {/* Claims Preview */}
+      {patent.claims.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Scale className="h-4 w-4" />
+                  Claims
+                </CardTitle>
+                <CardDescription>
+                  {independentClaims.length} independent, {dependentClaims.length} dependent
+                </CardDescription>
+              </div>
+              <Link href={`/patents/${id}/claims`}>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Pencil className="h-3.5 w-3.5" />
+                  Edit Claims
+                </Button>
+              </Link>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {patent.claims.map((claim) => (
+                <div
+                  key={claim.id}
+                  className="flex gap-3 rounded-md border p-3"
+                >
+                  <div className="shrink-0 flex flex-col items-center gap-1">
+                    <span className="text-sm font-mono font-bold tabular-nums">
+                      {claim.claimNumber}.
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge
+                        variant={claim.isIndependent ? "default" : "secondary"}
+                        className="text-[10px]"
+                      >
+                        {claim.isIndependent ? "Independent" : "Dependent"}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {(claim.claimType as string).replace(/_/g, " ")}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed line-clamp-2 break-words">
+                      {claim.fullText || (
+                        <span className="italic">No claim text</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

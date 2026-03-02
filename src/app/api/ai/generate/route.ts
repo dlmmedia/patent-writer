@@ -7,10 +7,25 @@ export async function POST(req: Request) {
     const { sectionType, model, instructions, context, jurisdiction } =
       await req.json();
 
-    const modelId = model as ModelId;
+    const modelId = (model || "gemini-2.5-flash") as ModelId;
     if (!(modelId in models)) {
       return Response.json(
         { error: `Invalid model "${model}". Valid models: ${Object.keys(models).join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    const isOpenAI = modelId.startsWith("gpt") || modelId === "o3";
+    const isGoogle = modelId.startsWith("gemini");
+    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OpenAI API key is not configured. Go to Settings to check your API keys." },
+        { status: 400 }
+      );
+    }
+    if (isGoogle && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      return Response.json(
+        { error: "Google AI API key is not configured. Go to Settings to check your API keys." },
         { status: 400 }
       );
     }

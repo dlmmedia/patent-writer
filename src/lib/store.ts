@@ -26,7 +26,7 @@ export const useAppStore = create<AppState>((set) => ({
   defaultDraftingModel: "gemini-2.5-flash",
   defaultClaimsModel: "gpt-5.2",
   defaultAnalysisModel: "gemini-2.5-pro",
-  defaultImageModel: "imagen-3",
+  defaultImageModel: "gemini-3-pro-image",
   setDefaultDraftingModel: (model) => set({ defaultDraftingModel: model }),
   setDefaultClaimsModel: (model) => set({ defaultClaimsModel: model }),
   setDefaultAnalysisModel: (model) => set({ defaultAnalysisModel: model }),

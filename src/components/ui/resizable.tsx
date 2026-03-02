@@ -13,7 +13,7 @@ function ResizablePanelGroup({
     <ResizablePrimitive.Group
       data-slot="resizable-panel-group"
       className={cn(
-        "flex h-full w-full aria-[orientation=vertical]:flex-col",
+        "flex h-full w-full min-w-0 min-h-0 aria-[orientation=vertical]:flex-col",
         className
       )}
       {...props}
@@ -21,8 +21,17 @@ function ResizablePanelGroup({
   )
 }
 
-function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
-  return <ResizablePrimitive.Panel data-slot="resizable-panel" {...props} />
+function ResizablePanel({
+  className,
+  ...props
+}: ResizablePrimitive.PanelProps) {
+  return (
+    <ResizablePrimitive.Panel
+      data-slot="resizable-panel"
+      className={cn("overflow-hidden min-w-0 min-h-0", className)}
+      {...props}
+    />
+  )
 }
 
 function ResizableHandle({

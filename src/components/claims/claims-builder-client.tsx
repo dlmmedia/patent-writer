@@ -43,6 +43,7 @@ import {
   Wand2,
   Save,
   ChevronRight,
+  ChevronDown,
   AlertTriangle,
   Scale,
   Loader2,
@@ -50,9 +51,11 @@ import {
   Sparkles,
   Eye,
   ListOrdered,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClaim, updateClaim, deleteClaim } from "@/lib/actions/patents";
+import { modelInfo, type ModelId } from "@/lib/ai/providers";
 import type { PatentClaim, ClaimType } from "@/lib/types";
 
 type PatentWithClaims = {
@@ -60,6 +63,7 @@ type PatentWithClaims = {
   title: string;
   inventionDescription: string | null;
   technologyArea: string | null;
+  jurisdiction: string;
   aiModelConfig: {
     draftingModel: string;
     claimsModel: string;
@@ -78,23 +82,32 @@ const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
   system: "System",
   apparatus: "Apparatus",
   composition: "Composition",
-  computer_readable_medium: "Computer Readable Medium",
-  means_plus_function: "Means + Function",
+  computer_readable_medium: "CRM",
+  means_plus_function: "Means+Function",
 };
 
 const CLAIM_TYPE_COLORS: Record<ClaimType, string> = {
-  method: "bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-800",
-  system: "bg-green-500/10 text-green-700 border-green-200 dark:text-green-400 dark:border-green-800",
-  apparatus: "bg-purple-500/10 text-purple-700 border-purple-200 dark:text-purple-400 dark:border-purple-800",
-  composition: "bg-yellow-500/10 text-yellow-700 border-yellow-200 dark:text-yellow-400 dark:border-yellow-800",
-  computer_readable_medium: "bg-orange-500/10 text-orange-700 border-orange-200 dark:text-orange-400 dark:border-orange-800",
-  means_plus_function: "bg-rose-500/10 text-rose-700 border-rose-200 dark:text-rose-400 dark:border-rose-800",
+  method:
+    "bg-blue-500/10 text-blue-700 border-blue-200 dark:text-blue-400 dark:border-blue-800",
+  system:
+    "bg-green-500/10 text-green-700 border-green-200 dark:text-green-400 dark:border-green-800",
+  apparatus:
+    "bg-purple-500/10 text-purple-700 border-purple-200 dark:text-purple-400 dark:border-purple-800",
+  composition:
+    "bg-yellow-500/10 text-yellow-700 border-yellow-200 dark:text-yellow-400 dark:border-yellow-800",
+  computer_readable_medium:
+    "bg-orange-500/10 text-orange-700 border-orange-200 dark:text-orange-400 dark:border-orange-800",
+  means_plus_function:
+    "bg-rose-500/10 text-rose-700 border-rose-200 dark:text-rose-400 dark:border-rose-800",
 };
 
 const TRANSITIONAL_PHRASES = [
   { value: "comprising", label: "Comprising (open-ended)" },
   { value: "consisting of", label: "Consisting of (closed)" },
-  { value: "consisting essentially of", label: "Consisting essentially of (semi-open)" },
+  {
+    value: "consisting essentially of",
+    label: "Consisting essentially of (semi-open)",
+  },
 ];
 
 export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
@@ -106,8 +119,10 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
+    () => new Set(claims.filter((c) => c.isIndependent).map((c) => c.id))
+  );
 
-  // AI generation state
   const [aiModel, setAiModel] = useState(
     patent.aiModelConfig?.claimsModel ?? "gpt-5.2"
   );
@@ -125,7 +140,6 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
     }>
   >([]);
 
-  // Editor form state
   const [editForm, setEditForm] = useState<{
     claimType: ClaimType;
     isIndependent: boolean;
@@ -150,35 +164,25 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
     [claims]
   );
 
-  const claimTree = useMemo(() => {
-    const roots = independentClaims;
-    const childrenMap = new Map<string, PatentClaim[]>();
-
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, PatentClaim[]>();
     for (const claim of dependentClaims) {
-      const parentId = claim.parentClaimId;
-      if (parentId) {
-        const existing = childrenMap.get(parentId) ?? [];
+      if (claim.parentClaimId) {
+        const existing = map.get(claim.parentClaimId) ?? [];
         existing.push(claim);
-        childrenMap.set(parentId, existing);
+        map.set(claim.parentClaimId, existing);
       }
     }
+    return map;
+  }, [dependentClaims]);
 
-    return { roots, childrenMap };
-  }, [independentClaims, dependentClaims]);
-
-  const selectClaim = useCallback(
-    (claim: PatentClaim) => {
-      setSelectedClaimId(claim.id);
-      setEditForm({
-        claimType: claim.claimType as ClaimType,
-        isIndependent: claim.isIndependent,
-        parentClaimId: claim.parentClaimId,
-        transitionalPhrase: claim.transitionalPhrase ?? "comprising",
-        preamble: claim.preamble ?? "",
-        body: claim.body ?? "",
-      });
-    },
-    []
+  const orphanClaims = useMemo(
+    () =>
+      dependentClaims.filter(
+        (c) =>
+          !c.parentClaimId || !claims.find((p) => p.id === c.parentClaimId)
+      ),
+    [dependentClaims, claims]
   );
 
   const fullTextPreview = useMemo(() => {
@@ -189,6 +193,30 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
     if (editForm.body) parts.push(editForm.body.trim());
     return parts.join(" ");
   }, [editForm]);
+
+  const selectClaim = useCallback((claim: PatentClaim) => {
+    setSelectedClaimId(claim.id);
+    setEditForm({
+      claimType: claim.claimType as ClaimType,
+      isIndependent: claim.isIndependent,
+      parentClaimId: claim.parentClaimId,
+      transitionalPhrase: claim.transitionalPhrase ?? "comprising",
+      preamble: claim.preamble ?? "",
+      body: claim.body ?? "",
+    });
+  }, []);
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   const handleSave = async () => {
     if (!selectedClaim || !editForm) return;
@@ -253,6 +281,7 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
         [...prev, newClaim].sort((a, b) => a.claimNumber - b.claimNumber)
       );
       selectClaim(newClaim);
+      setExpandedNodes((prev) => new Set([...prev, newClaim.id]));
       toast.success(`Claim ${nextNumber} added`);
     } catch {
       toast.error("Failed to add claim");
@@ -284,6 +313,13 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
   };
 
   const handleGenerate = async () => {
+    if (!patent.inventionDescription?.trim()) {
+      toast.error(
+        "Please add an invention description to your patent before generating claims."
+      );
+      return;
+    }
+
     setIsGenerating(true);
     setGeneratedClaims([]);
     try {
@@ -298,6 +334,7 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
           instructions: aiInstructions,
           inventionDescription: patent.inventionDescription,
           technologyArea: patent.technologyArea,
+          jurisdiction: patent.jurisdiction,
           existingClaims: claims.map((c) => ({
             claimNumber: c.claimNumber,
             claimType: c.claimType,
@@ -360,8 +397,16 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
     }
   };
 
+  const handleAddAllGenerated = async () => {
+    for (const g of [...generatedClaims]) {
+      await handleAddGenerated(g);
+    }
+  };
+
+  const currentModelInfo = modelInfo[aiModel as ModelId];
+
   return (
-    <div className="flex h-full flex-col" style={{ height: "100%" }}>
+    <div className="flex h-full w-full min-h-0 min-w-0 flex-col overflow-hidden">
       {/* Header */}
       <div className="shrink-0 flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-3">
@@ -398,12 +443,14 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
       </div>
 
       {/* Main Panels */}
-      <div className="relative flex-1 min-h-0">
-        <div className="absolute inset-0">
-          <ResizablePanelGroup orientation="horizontal" style={{ height: "100%", width: "100%" }}>
+      <div className="relative flex-1 min-h-0 min-w-0 overflow-hidden">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="h-full w-full min-h-0 min-w-0"
+        >
           {/* Left Panel: Claim Tree */}
-          <ResizablePanel defaultSize={40} minSize={25} maxSize={55}>
-            <div className="flex h-full flex-col border-r">
+          <ResizablePanel defaultSize={32} minSize={20} maxSize={50}>
+            <div className="flex h-full min-w-0 flex-col border-r overflow-hidden">
               <div className="shrink-0 border-b px-4 py-3">
                 <h3 className="text-sm font-semibold">Claim Tree</h3>
                 <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -411,49 +458,52 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
                 </p>
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto">
-                <div className="p-3 space-y-1">
+                <div className="p-3 space-y-0.5">
                   {claims.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-center">
                       <Scale className="size-10 text-muted-foreground/40 mb-3" />
                       <p className="text-sm text-muted-foreground">
                         No claims yet
                       </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Add a claim or generate with AI
+                      <p className="text-xs text-muted-foreground/70 mt-1 mb-4">
+                        Add a claim manually or generate with AI
                       </p>
+                      <Button size="sm" onClick={handleAddClaim}>
+                        <Plus className="mr-1.5 size-3.5" />
+                        Add First Claim
+                      </Button>
                     </div>
                   ) : (
-                    claimTree.roots.map((root) => (
-                      <ClaimTreeNode
-                        key={root.id}
-                        claim={root}
-                        children={claimTree.childrenMap.get(root.id) ?? []}
-                        selectedId={selectedClaimId}
-                        onSelect={selectClaim}
-                        allClaims={claims}
-                        childrenMap={claimTree.childrenMap}
-                      />
-                    ))
+                    <>
+                      {independentClaims.map((root) => (
+                        <ClaimTreeNode
+                          key={root.id}
+                          claim={root}
+                          children={childrenMap.get(root.id) ?? []}
+                          selectedId={selectedClaimId}
+                          onSelect={selectClaim}
+                          childrenMap={childrenMap}
+                          expandedNodes={expandedNodes}
+                          onToggleExpand={toggleExpanded}
+                          depth={0}
+                        />
+                      ))}
+                      {orphanClaims.map((orphan) => (
+                        <ClaimTreeNode
+                          key={orphan.id}
+                          claim={orphan}
+                          children={[]}
+                          selectedId={selectedClaimId}
+                          onSelect={selectClaim}
+                          childrenMap={childrenMap}
+                          expandedNodes={expandedNodes}
+                          onToggleExpand={toggleExpanded}
+                          isOrphan
+                          depth={0}
+                        />
+                      ))}
+                    </>
                   )}
-
-                  {dependentClaims
-                    .filter(
-                      (c) =>
-                        !c.parentClaimId ||
-                        !claims.find((p) => p.id === c.parentClaimId)
-                    )
-                    .map((orphan) => (
-                      <ClaimTreeNode
-                        key={orphan.id}
-                        claim={orphan}
-                        children={[]}
-                        selectedId={selectedClaimId}
-                        onSelect={selectClaim}
-                        allClaims={claims}
-                        childrenMap={claimTree.childrenMap}
-                        isOrphan
-                      />
-                    ))}
                 </div>
               </div>
             </div>
@@ -462,102 +512,392 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
           <ResizableHandle withHandle />
 
           {/* Right Panel: Editor + AI */}
-          <ResizablePanel defaultSize={60} minSize={40}>
-            <div className="flex h-full flex-col">
-              <div className="flex-1 min-h-0 overflow-y-auto">
-                <div className="p-4 space-y-6">
-                {/* Claim Editor */}
-                {selectedClaim && editForm ? (
+          <ResizablePanel defaultSize={68} minSize={45}>
+            <div className="flex h-full min-w-0 flex-col overflow-hidden">
+              <div className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden">
+                <div className="p-4 space-y-6 min-w-0">
+                  {/* Claim Editor */}
+                  {selectedClaim && editForm ? (
+                    <Card>
+                      <CardHeader className="pb-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <CardTitle className="text-base">
+                              Claim {selectedClaim.claimNumber}
+                            </CardTitle>
+                            <CardDescription>
+                              Edit claim details and content
+                            </CardDescription>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Dialog
+                              open={deleteDialogOpen}
+                              onOpenChange={setDeleteDialogOpen}
+                            >
+                              <DialogTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </Button>
+                              </DialogTrigger>
+                              <DialogContent>
+                                <DialogHeader>
+                                  <DialogTitle>Delete Claim</DialogTitle>
+                                  <DialogDescription>
+                                    Are you sure you want to delete Claim{" "}
+                                    {selectedClaim.claimNumber}? This action
+                                    cannot be undone.
+                                  </DialogDescription>
+                                </DialogHeader>
+                                <DialogFooter>
+                                  <Button
+                                    variant="outline"
+                                    onClick={() => setDeleteDialogOpen(false)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    variant="destructive"
+                                    onClick={handleDelete}
+                                    disabled={isDeleting}
+                                  >
+                                    {isDeleting && (
+                                      <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                                    )}
+                                    Delete
+                                  </Button>
+                                </DialogFooter>
+                              </DialogContent>
+                            </Dialog>
+                            <Button
+                              size="sm"
+                              onClick={handleSave}
+                              disabled={isSaving}
+                            >
+                              {isSaving ? (
+                                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                              ) : (
+                                <Save className="mr-1.5 size-3.5" />
+                              )}
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Row 1: Claim Number + Type */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-xs">Claim Number</Label>
+                            <Input
+                              value={selectedClaim.claimNumber}
+                              readOnly
+                              className="bg-muted/50"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-xs">Claim Type</Label>
+                            <Select
+                              value={editForm.claimType}
+                              onValueChange={(v) =>
+                                setEditForm((f) =>
+                                  f
+                                    ? { ...f, claimType: v as ClaimType }
+                                    : f
+                                )
+                              }
+                            >
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(CLAIM_TYPE_LABELS).map(
+                                  ([value, label]) => (
+                                    <SelectItem key={value} value={value}>
+                                      {label}
+                                    </SelectItem>
+                                  )
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        {/* Row 2: Independent toggle + Parent */}
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-xs">
+                              Independent Claim
+                            </Label>
+                            <div className="flex items-center gap-2 pt-1">
+                              <Switch
+                                checked={editForm.isIndependent}
+                                onCheckedChange={(checked) =>
+                                  setEditForm((f) =>
+                                    f
+                                      ? {
+                                          ...f,
+                                          isIndependent: checked,
+                                          parentClaimId: checked
+                                            ? null
+                                            : f.parentClaimId,
+                                        }
+                                      : f
+                                  )
+                                }
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                {editForm.isIndependent
+                                  ? "Independent"
+                                  : "Dependent"}
+                              </span>
+                            </div>
+                          </div>
+                          {!editForm.isIndependent && (
+                            <div className="space-y-2">
+                              <Label className="text-xs">Parent Claim</Label>
+                              <Select
+                                value={editForm.parentClaimId ?? ""}
+                                onValueChange={(v) =>
+                                  setEditForm((f) =>
+                                    f ? { ...f, parentClaimId: v } : f
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue placeholder="Select parent..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {independentClaims
+                                    .filter(
+                                      (c) => c.id !== selectedClaim.id
+                                    )
+                                    .map((c) => (
+                                      <SelectItem key={c.id} value={c.id}>
+                                        Claim {c.claimNumber} (
+                                        {
+                                          CLAIM_TYPE_LABELS[
+                                            c.claimType as ClaimType
+                                          ]
+                                        }
+                                        )
+                                      </SelectItem>
+                                    ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Transitional Phrase */}
+                        <div className="space-y-2">
+                          <Label className="text-xs">
+                            Transitional Phrase
+                          </Label>
+                          <Select
+                            value={editForm.transitionalPhrase}
+                            onValueChange={(v) =>
+                              setEditForm((f) =>
+                                f ? { ...f, transitionalPhrase: v } : f
+                              )
+                            }
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {TRANSITIONAL_PHRASES.map((p) => (
+                                <SelectItem key={p.value} value={p.value}>
+                                  {p.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {/* Preamble */}
+                        <div className="space-y-2">
+                          <Label className="text-xs">Preamble</Label>
+                          <Textarea
+                            value={editForm.preamble}
+                            onChange={(e) =>
+                              setEditForm((f) =>
+                                f
+                                  ? { ...f, preamble: e.target.value }
+                                  : f
+                              )
+                            }
+                            placeholder="A method for processing data, the method..."
+                            className="min-h-[80px] text-sm"
+                          />
+                        </div>
+
+                        {/* Body */}
+                        <div className="space-y-2">
+                          <Label className="text-xs">Body</Label>
+                          <Textarea
+                            value={editForm.body}
+                            onChange={(e) =>
+                              setEditForm((f) =>
+                                f ? { ...f, body: e.target.value } : f
+                              )
+                            }
+                            placeholder={`receiving, by a processor, input data from a source;\ntransforming the input data using a trained model;\noutputting a result based on the transformation.`}
+                            className="min-h-[200px] text-sm font-mono leading-relaxed"
+                          />
+                        </div>
+
+                        <Separator />
+
+                        {/* Full Text Preview */}
+                        <div className="space-y-2">
+                          <Label className="text-xs flex items-center gap-1.5">
+                            <Eye className="size-3" />
+                            Full Text Preview
+                          </Label>
+                          <div className="rounded-md border bg-muted/30 p-3">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                              {fullTextPreview || (
+                                <span className="text-muted-foreground italic">
+                                  Fill in the preamble and body to see the
+                                  full claim text.
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Scores */}
+                        {(selectedClaim.noveltyScore !== null ||
+                          selectedClaim.breadthScore !== null) && (
+                          <>
+                            <Separator />
+                            <div className="flex items-center gap-4">
+                              {selectedClaim.noveltyScore !== null && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-muted-foreground">
+                                    Novelty:
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs"
+                                  >
+                                    {(
+                                      selectedClaim.noveltyScore * 100
+                                    ).toFixed(0)}
+                                    %
+                                  </Badge>
+                                </div>
+                              )}
+                              {selectedClaim.breadthScore !== null && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-muted-foreground">
+                                    Breadth:
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs"
+                                  >
+                                    {(
+                                      selectedClaim.breadthScore * 100
+                                    ).toFixed(0)}
+                                    %
+                                  </Badge>
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <Card>
+                      <CardContent className="flex flex-col items-center justify-center py-16">
+                        <Scale className="size-10 text-muted-foreground/40 mb-3" />
+                        <p className="text-sm text-muted-foreground">
+                          Select a claim from the tree to edit
+                        </p>
+                        <p className="text-xs text-muted-foreground/70 mt-1">
+                          Or add a new claim to get started
+                        </p>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  <Separator />
+
+                  {/* AI Generation Panel */}
                   <Card>
                     <CardHeader className="pb-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <CardTitle className="text-base">
-                            Claim {selectedClaim.claimNumber}
-                          </CardTitle>
-                          <CardDescription>
-                            Edit claim details and content
-                          </CardDescription>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Dialog
-                            open={deleteDialogOpen}
-                            onOpenChange={setDeleteDialogOpen}
-                          >
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                              >
-                                <Trash2 className="size-3.5" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent>
-                              <DialogHeader>
-                                <DialogTitle>Delete Claim</DialogTitle>
-                                <DialogDescription>
-                                  Are you sure you want to delete Claim{" "}
-                                  {selectedClaim.claimNumber}? This action
-                                  cannot be undone.
-                                </DialogDescription>
-                              </DialogHeader>
-                              <DialogFooter>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => setDeleteDialogOpen(false)}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  variant="destructive"
-                                  onClick={handleDelete}
-                                  disabled={isDeleting}
-                                >
-                                  {isDeleting && (
-                                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                                  )}
-                                  Delete
-                                </Button>
-                              </DialogFooter>
-                            </DialogContent>
-                          </Dialog>
-                          <Button
-                            size="sm"
-                            onClick={handleSave}
-                            disabled={isSaving}
-                          >
-                            {isSaving ? (
-                              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                            ) : (
-                              <Save className="mr-1.5 size-3.5" />
-                            )}
-                            Save
-                          </Button>
-                        </div>
-                      </div>
+                      <CardTitle className="text-base flex items-center gap-2">
+                        <Wand2 className="size-4" />
+                        AI Claim Generator
+                      </CardTitle>
+                      <CardDescription>
+                        Generate patent claims from your invention description
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      {/* Row 1: Claim Number + Type */}
-                      <div className="grid grid-cols-2 gap-4">
+                      {/* Invention context */}
+                      {patent.inventionDescription ? (
+                        <div className="rounded-md border bg-muted/30 p-3">
+                          <div className="flex items-start gap-2">
+                            <Info className="size-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                            <p className="text-xs text-muted-foreground line-clamp-3">
+                              <span className="font-medium text-foreground">
+                                Invention:
+                              </span>{" "}
+                              {patent.inventionDescription}
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="size-3.5 text-amber-600 mt-0.5 shrink-0" />
+                            <p className="text-xs text-amber-700 dark:text-amber-400">
+                              Add an invention description to your patent to
+                              enable AI claim generation.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="space-y-2">
-                          <Label className="text-xs">Claim Number</Label>
-                          <Input
-                            value={selectedClaim.claimNumber}
-                            readOnly
-                            className="bg-muted/50"
-                          />
+                          <Label className="text-xs">Model</Label>
+                          <Select value={aiModel} onValueChange={setAiModel}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(
+                                Object.entries(modelInfo) as [
+                                  ModelId,
+                                  (typeof modelInfo)[ModelId],
+                                ][]
+                              ).map(([id, info]) => (
+                                <SelectItem key={id} value={id}>
+                                  {info.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {currentModelInfo && (
+                            <p className="text-[10px] text-muted-foreground">
+                              {currentModelInfo.provider}
+                            </p>
+                          )}
                         </div>
                         <div className="space-y-2">
                           <Label className="text-xs">Claim Type</Label>
                           <Select
-                            value={editForm.claimType}
+                            value={aiClaimType}
                             onValueChange={(v) =>
-                              setEditForm((f) =>
-                                f
-                                  ? { ...f, claimType: v as ClaimType }
-                                  : f
-                              )
+                              setAiClaimType(v as ClaimType)
                             }
                           >
                             <SelectTrigger className="w-full">
@@ -574,291 +914,56 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
                             </SelectContent>
                           </Select>
                         </div>
-                      </div>
-
-                      {/* Row 2: Independent toggle + Parent */}
-                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label className="text-xs">Independent Claim</Label>
-                          <div className="flex items-center gap-2 pt-1">
-                            <Switch
-                              checked={editForm.isIndependent}
-                              onCheckedChange={(checked) =>
-                                setEditForm((f) =>
-                                  f
-                                    ? {
-                                        ...f,
-                                        isIndependent: checked,
-                                        parentClaimId: checked
-                                          ? null
-                                          : f.parentClaimId,
-                                      }
-                                    : f
-                                )
-                              }
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {editForm.isIndependent
-                                ? "Independent"
-                                : "Dependent"}
-                            </span>
-                          </div>
+                          <Label className="text-xs">Count</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={20}
+                            value={aiClaimCount}
+                            onChange={(e) => setAiClaimCount(e.target.value)}
+                          />
                         </div>
-                        {!editForm.isIndependent && (
-                          <div className="space-y-2">
-                            <Label className="text-xs">Parent Claim</Label>
-                            <Select
-                              value={editForm.parentClaimId ?? ""}
-                              onValueChange={(v) =>
-                                setEditForm((f) =>
-                                  f ? { ...f, parentClaimId: v } : f
-                                )
-                              }
-                            >
-                              <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select parent…" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {independentClaims
-                                  .filter(
-                                    (c) => c.id !== selectedClaim.id
-                                  )
-                                  .map((c) => (
-                                    <SelectItem key={c.id} value={c.id}>
-                                      Claim {c.claimNumber} (
-                                      {CLAIM_TYPE_LABELS[c.claimType as ClaimType]})
-                                    </SelectItem>
-                                  ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        )}
                       </div>
 
-                      {/* Transitional Phrase */}
                       <div className="space-y-2">
                         <Label className="text-xs">
-                          Transitional Phrase
+                          Additional Instructions
                         </Label>
-                        <Select
-                          value={editForm.transitionalPhrase}
-                          onValueChange={(v) =>
-                            setEditForm((f) =>
-                              f ? { ...f, transitionalPhrase: v } : f
-                            )
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {TRANSITIONAL_PHRASES.map((p) => (
-                              <SelectItem key={p.value} value={p.value}>
-                                {p.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      {/* Preamble */}
-                      <div className="space-y-2">
-                        <Label className="text-xs">Preamble</Label>
                         <Textarea
-                          value={editForm.preamble}
-                          onChange={(e) =>
-                            setEditForm((f) =>
-                              f
-                                ? { ...f, preamble: e.target.value }
-                                : f
-                            )
-                          }
-                          placeholder="A method for processing data, the method…"
+                          value={aiInstructions}
+                          onChange={(e) => setAiInstructions(e.target.value)}
+                          placeholder="e.g., Focus on the data processing pipeline, include dependent claims for specific embodiments..."
                           className="min-h-[80px] text-sm"
                         />
                       </div>
 
-                      {/* Body */}
-                      <div className="space-y-2">
-                        <Label className="text-xs">Body</Label>
-                        <Textarea
-                          value={editForm.body}
-                          onChange={(e) =>
-                            setEditForm((f) =>
-                              f ? { ...f, body: e.target.value } : f
-                            )
-                          }
-                          placeholder="receiving, by a processor, input data from a source;&#10;transforming the input data using a trained model;&#10;outputting a result based on the transformation."
-                          className="min-h-[200px] text-sm font-mono leading-relaxed"
-                        />
-                      </div>
+                      <Button
+                        className="w-full"
+                        onClick={handleGenerate}
+                        disabled={
+                          isGenerating ||
+                          !patent.inventionDescription?.trim()
+                        }
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="mr-1.5 size-4 animate-spin" />
+                        ) : (
+                          <Sparkles className="mr-1.5 size-4" />
+                        )}
+                        Generate Claims
+                      </Button>
 
-                      <Separator />
-
-                      {/* Full Text Preview */}
-                      <div className="space-y-2">
-                        <Label className="text-xs flex items-center gap-1.5">
-                          <Eye className="size-3" />
-                          Full Text Preview
-                        </Label>
-                        <div className="rounded-md border bg-muted/30 p-3">
-                          <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                            {fullTextPreview || (
-                              <span className="text-muted-foreground italic">
-                                Fill in the preamble and body to see the
-                                full claim text.
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Scores */}
-                      {(selectedClaim.noveltyScore !== null ||
-                        selectedClaim.breadthScore !== null) && (
-                        <>
-                          <Separator />
-                          <div className="flex items-center gap-4">
-                            {selectedClaim.noveltyScore !== null && (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs text-muted-foreground">
-                                  Novelty:
-                                </span>
-                                <Badge variant="outline" className="text-xs">
-                                  {(selectedClaim.noveltyScore * 100).toFixed(0)}%
-                                </Badge>
-                              </div>
-                            )}
-                            {selectedClaim.breadthScore !== null && (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs text-muted-foreground">
-                                  Breadth:
-                                </span>
-                                <Badge variant="outline" className="text-xs">
-                                  {(selectedClaim.breadthScore * 100).toFixed(0)}%
-                                </Badge>
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card>
-                    <CardContent className="flex flex-col items-center justify-center py-16">
-                      <Scale className="size-10 text-muted-foreground/40 mb-3" />
-                      <p className="text-sm text-muted-foreground">
-                        Select a claim from the tree to edit
-                      </p>
-                      <p className="text-xs text-muted-foreground/70 mt-1">
-                        Or add a new claim to get started
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
-
-                <Separator />
-
-                {/* AI Generation Panel */}
-                <Card>
-                  <CardHeader className="pb-4">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Wand2 className="size-4" />
-                      AI Claim Generator
-                    </CardTitle>
-                    <CardDescription>
-                      Use AI to draft patent claims based on your invention
-                      description
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-xs">Model</Label>
-                        <Select value={aiModel} onValueChange={setAiModel}>
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="gpt-5.2">GPT-5.2</SelectItem>
-                            <SelectItem value="gpt-5-mini">
-                              GPT-5 Mini
-                            </SelectItem>
-                            <SelectItem value="gemini-2.5-pro">
-                              Gemini 2.5 Pro
-                            </SelectItem>
-                            <SelectItem value="gemini-2.5-flash">
-                              Gemini 2.5 Flash
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs">Claim Type</Label>
-                        <Select
-                          value={aiClaimType}
-                          onValueChange={(v) =>
-                            setAiClaimType(v as ClaimType)
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(CLAIM_TYPE_LABELS).map(
-                              ([value, label]) => (
-                                <SelectItem key={value} value={value}>
-                                  {label}
-                                </SelectItem>
-                              )
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs">Count</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={20}
-                          value={aiClaimCount}
-                          onChange={(e) => setAiClaimCount(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-xs">
-                        Additional Instructions
-                      </Label>
-                      <Textarea
-                        value={aiInstructions}
-                        onChange={(e) => setAiInstructions(e.target.value)}
-                        placeholder="e.g., Focus on the data processing pipeline, include dependent claims for specific embodiments…"
-                        className="min-h-[80px] text-sm"
-                      />
-                    </div>
-
-                    <Button
-                      className="w-full"
-                      onClick={handleGenerate}
-                      disabled={isGenerating}
-                    >
-                      {isGenerating ? (
-                        <Loader2 className="mr-1.5 size-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="mr-1.5 size-4" />
-                      )}
-                      Generate Claims
-                    </Button>
-
-                    {/* Loading skeleton */}
-                    {isGenerating && (
-                      <div className="space-y-3">
-                        {Array.from({ length: parseInt(aiClaimCount, 10) || 3 }).map(
-                          (_, i) => (
-                            <div key={i} className="rounded-md border p-3 space-y-2">
+                      {/* Loading skeleton */}
+                      {isGenerating && (
+                        <div className="space-y-3">
+                          {Array.from({
+                            length: parseInt(aiClaimCount, 10) || 3,
+                          }).map((_, i) => (
+                            <div
+                              key={i}
+                              className="rounded-md border p-3 space-y-2"
+                            >
                               <div className="flex items-center gap-2">
                                 <Skeleton className="h-4 w-20" />
                                 <Skeleton className="h-4 w-16" />
@@ -867,84 +972,81 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
                               <Skeleton className="h-3 w-4/5" />
                               <Skeleton className="h-3 w-3/5" />
                             </div>
-                          )
-                        )}
-                      </div>
-                    )}
-
-                    {/* Generated claims preview */}
-                    {generatedClaims.length > 0 && (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-medium text-muted-foreground">
-                            {generatedClaims.length} generated — review
-                            and add
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={async () => {
-                              for (const g of generatedClaims) {
-                                await handleAddGenerated(g);
-                              }
-                            }}
-                          >
-                            <Plus className="mr-1 size-3" />
-                            Add All
-                          </Button>
+                          ))}
                         </div>
-                        {generatedClaims.map((generated, idx) => (
-                          <div
-                            key={idx}
-                            className="rounded-md border p-3 space-y-2"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Badge
-                                  variant="outline"
-                                  className={`text-[10px] ${CLAIM_TYPE_COLORS[generated.claimType]}`}
-                                >
-                                  {CLAIM_TYPE_LABELS[generated.claimType]}
-                                </Badge>
-                                <Badge
-                                  variant={
-                                    generated.isIndependent
-                                      ? "default"
-                                      : "secondary"
-                                  }
-                                  className="text-[10px]"
-                                >
-                                  {generated.isIndependent
-                                    ? "Independent"
-                                    : "Dependent"}
-                                </Badge>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => handleAddGenerated(generated)}
-                              >
-                                <Plus className="mr-1 size-3" />
-                                Add
-                              </Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">
-                              {generated.preamble}{" "}
-                              {generated.transitionalPhrase}{" "}
-                              {generated.body}
+                      )}
+
+                      {/* Generated claims preview */}
+                      {generatedClaims.length > 0 && (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {generatedClaims.length} generated -- review and
+                              add
                             </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleAddAllGenerated}
+                            >
+                              <Plus className="mr-1 size-3" />
+                              Add All
+                            </Button>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
+                          {generatedClaims.map((generated, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-md border p-3 space-y-2"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] ${CLAIM_TYPE_COLORS[generated.claimType] ?? ""}`}
+                                  >
+                                    {CLAIM_TYPE_LABELS[generated.claimType] ??
+                                      generated.claimType}
+                                  </Badge>
+                                  <Badge
+                                    variant={
+                                      generated.isIndependent
+                                        ? "default"
+                                        : "secondary"
+                                    }
+                                    className="text-[10px]"
+                                  >
+                                    {generated.isIndependent
+                                      ? "Independent"
+                                      : "Dependent"}
+                                  </Badge>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() =>
+                                    handleAddGenerated(generated)
+                                  }
+                                >
+                                  <Plus className="mr-1 size-3" />
+                                  Add
+                                </Button>
+                              </div>
+                              <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">
+                                {generated.preamble}{" "}
+                                {generated.transitionalPhrase}{" "}
+                                {generated.body}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
             </div>
           </ResizablePanel>
-          </ResizablePanelGroup>
-        </div>
+        </ResizablePanelGroup>
       </div>
     </div>
   );
@@ -955,8 +1057,9 @@ function ClaimTreeNode({
   children,
   selectedId,
   onSelect,
-  allClaims,
   childrenMap,
+  expandedNodes,
+  onToggleExpand,
   isOrphan = false,
   depth = 0,
 }: {
@@ -964,13 +1067,16 @@ function ClaimTreeNode({
   children: PatentClaim[];
   selectedId: string | null;
   onSelect: (claim: PatentClaim) => void;
-  allClaims: PatentClaim[];
   childrenMap: Map<string, PatentClaim[]>;
+  expandedNodes: Set<string>;
+  onToggleExpand: (id: string) => void;
   isOrphan?: boolean;
   depth?: number;
 }) {
   const isSelected = selectedId === claim.id;
   const claimType = claim.claimType as ClaimType;
+  const hasChildren = children.length > 0;
+  const isExpanded = expandedNodes.has(claim.id);
 
   return (
     <div>
@@ -983,12 +1089,23 @@ function ClaimTreeNode({
         }`}
         style={{ paddingLeft: `${12 + depth * 20}px` }}
       >
-        {children.length > 0 && (
-          <ChevronRight className="size-3 text-muted-foreground shrink-0" />
-        )}
-        {children.length === 0 && depth > 0 && (
+        {hasChildren ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand(claim.id);
+            }}
+            className="shrink-0"
+          >
+            {isExpanded ? (
+              <ChevronDown className="size-3 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="size-3 text-muted-foreground" />
+            )}
+          </button>
+        ) : depth > 0 ? (
           <span className="size-3 shrink-0" />
-        )}
+        ) : null}
 
         <Hash className="size-3 text-muted-foreground shrink-0" />
 
@@ -999,46 +1116,37 @@ function ClaimTreeNode({
         >
           {claim.claimNumber}.{" "}
           {claim.fullText
-            ? claim.fullText.slice(0, 60) +
-              (claim.fullText.length > 60 ? "…" : "")
+            ? claim.fullText.slice(0, 50) +
+              (claim.fullText.length > 50 ? "..." : "")
             : "(empty)"}
         </span>
 
         <div className="flex items-center gap-1 shrink-0">
-          {isOrphan && (
-            <AlertTriangle className="size-3 text-amber-500" />
-          )}
+          {isOrphan && <AlertTriangle className="size-3 text-amber-500" />}
           <Badge
             variant="outline"
-            className={`text-[10px] px-1.5 py-0 ${CLAIM_TYPE_COLORS[claimType]}`}
+            className={`text-[10px] px-1.5 py-0 ${CLAIM_TYPE_COLORS[claimType] ?? ""}`}
           >
-            {CLAIM_TYPE_LABELS[claimType]?.split(" ")[0]}
+            {CLAIM_TYPE_LABELS[claimType]?.split(" ")[0] ?? claimType}
           </Badge>
-          {claim.noveltyScore !== null && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0">
-              N:{(claim.noveltyScore * 100).toFixed(0)}
-            </Badge>
-          )}
-          {claim.breadthScore !== null && (
-            <Badge variant="outline" className="text-[10px] px-1 py-0">
-              B:{(claim.breadthScore * 100).toFixed(0)}
-            </Badge>
-          )}
         </div>
       </button>
 
-      {children.map((child) => (
-        <ClaimTreeNode
-          key={child.id}
-          claim={child}
-          children={childrenMap.get(child.id) ?? []}
-          selectedId={selectedId}
-          onSelect={onSelect}
-          allClaims={allClaims}
-          childrenMap={childrenMap}
-          depth={depth + 1}
-        />
-      ))}
+      {hasChildren &&
+        isExpanded &&
+        children.map((child) => (
+          <ClaimTreeNode
+            key={child.id}
+            claim={child}
+            children={childrenMap.get(child.id) ?? []}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            childrenMap={childrenMap}
+            expandedNodes={expandedNodes}
+            onToggleExpand={onToggleExpand}
+            depth={depth + 1}
+          />
+        ))}
     </div>
   );
 }

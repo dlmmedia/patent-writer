@@ -41,6 +41,9 @@ const IMAGE_MODEL_IDS = Object.keys(imageModelInfo) as ImageModelId[];
 const API_KEYS = [
   { name: "OpenAI", env: "OPENAI_API_KEY" },
   { name: "Google Generative AI", env: "GOOGLE_GENERATIVE_AI_API_KEY" },
+  { name: "USPTO Data API", env: "USPTO_API_KEY" },
+  { name: "USPTO ODP API", env: "USPTO_ODP_API_KEY" },
+  { name: "PatentsView API", env: "PATENTSVIEW_API_KEY" },
   { name: "EPO OPS (Consumer Key)", env: "EPO_CONSUMER_KEY" },
   { name: "EPO OPS (Consumer Secret)", env: "EPO_CONSUMER_SECRET" },
   { name: "Vercel Blob Storage", env: "BLOB_READ_WRITE_TOKEN" },

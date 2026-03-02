@@ -12,20 +12,8 @@ export default async function EditorPage({
   if (!patent) notFound();
 
   return (
-    <div className="absolute inset-0 flex flex-col">
-      <div className="shrink-0 border-b px-6 py-3">
-        <h2 className="text-lg font-semibold tracking-tight">
-          {patent.title}
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          Patent Editor &mdash; {patent.sections.length} sections
-        </p>
-      </div>
-      <div className="relative flex-1 min-h-0">
-        <div className="absolute inset-0">
-          <PatentEditorClient patent={patent as any} />
-        </div>
-      </div>
+    <div className="flex h-full w-full min-h-0 min-w-0 overflow-hidden">
+      <PatentEditorClient patent={patent} />
     </div>
   );
 }
