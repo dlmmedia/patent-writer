@@ -14,6 +14,11 @@ import {
 } from "@tanstack/react-table";
 import { useMutation } from "@tanstack/react-query";
 import type { Patent, PriorArtResult, RiskLevel } from "@/lib/types";
+import {
+  savePriorArtSearch,
+  savePriorArtResults,
+  togglePriorArtIDS,
+} from "@/lib/actions/patents";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +43,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Search,
   ExternalLink,
@@ -45,15 +51,15 @@ import {
   Shield,
   FileText,
   Plus,
-  ChevronDown,
   Filter,
   Loader2,
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  ImageIcon,
 } from "lucide-react";
-
-// ─── Types ──────────────────────────────────────────────────
+import { toast } from "sonner";
 
 interface SearchApiResult {
   id: string;
@@ -75,12 +81,25 @@ interface Analysis {
   recommendation: string;
 }
 
+interface PatentViewData {
+  title: string;
+  abstract: string;
+  description: string;
+  claims: string[];
+  images: { url: string; label: string }[];
+  filingDate: string;
+  inventors: string[];
+  assignee: string;
+  patentNumber: string;
+}
+
 interface DisplayResult extends SearchApiResult {
   riskLevel?: RiskLevel;
   relevanceScore?: number;
   analysis?: Analysis;
   addedToIds: boolean;
   analysing?: boolean;
+  viewData?: PatentViewData;
 }
 
 interface PriorArtClientProps {
@@ -90,8 +109,6 @@ interface PriorArtClientProps {
   };
   initialResults: PriorArtResult[];
 }
-
-// ─── Helpers ────────────────────────────────────────────────
 
 const RISK_CONFIG: Record<RiskLevel, { label: string; className: string }> = {
   high: {
@@ -111,7 +128,7 @@ const RISK_CONFIG: Record<RiskLevel, { label: string; className: string }> = {
 };
 
 const SOURCE_LABELS: Record<string, string> = {
-  patentsview: "USPTO Data / PatentsView",
+  patentsview: "USPTO / PatentsView",
   epo: "EPO OPS",
 };
 
@@ -123,9 +140,10 @@ function buildClaimText(patent: PriorArtClientProps["patent"]): string {
   return abstract?.plainText || patent.title;
 }
 
-// ─── Component ──────────────────────────────────────────────
-
-export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) {
+export function PriorArtClient({
+  patent,
+  initialResults,
+}: PriorArtClientProps) {
   const [query, setQuery] = React.useState("");
   const [sourcePatentsView, setSourcePatentsView] = React.useState(true);
   const [sourceEpo, setSourceEpo] = React.useState(true);
@@ -157,18 +175,23 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
   const [searching, setSearching] = React.useState(false);
   const [searchError, setSearchError] = React.useState<string | null>(null);
   const [sourceErrors, setSourceErrors] = React.useState<string[]>([]);
-  const [selectedResult, setSelectedResult] = React.useState<DisplayResult | null>(null);
+  const [selectedResult, setSelectedResult] =
+    React.useState<DisplayResult | null>(null);
   const [sheetOpen, setSheetOpen] = React.useState(false);
+  const [sheetMode, setSheetMode] = React.useState<"view" | "analysis">(
+    "view"
+  );
+  const [viewLoading, setViewLoading] = React.useState(false);
   const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
+    []
+  );
   const [sourceFilter, setSourceFilter] = React.useState<string>("all");
 
   const idsCount = React.useMemo(
     () => results.filter((r) => r.addedToIds).length,
     [results]
   );
-
-  // ─── Search mutation ────────────────────────────────────
 
   async function handleSearch() {
     if (!query.trim()) return;
@@ -189,15 +212,21 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: query.trim(), sources, patentId: patent.id }),
+        body: JSON.stringify({
+          query: query.trim(),
+          sources,
+          patentId: patent.id,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data?.error || "Search failed");
       }
 
-      setSourceErrors(Array.isArray(data?.meta?.errors) ? data.meta.errors : []);
-      if (data.results) {
+      setSourceErrors(
+        Array.isArray(data?.meta?.errors) ? data.meta.errors : []
+      );
+      if (data.results && data.results.length > 0) {
         const mapped: DisplayResult[] = data.results.map(
           (r: SearchApiResult) => ({
             ...r,
@@ -205,34 +234,112 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
           })
         );
         setResults(mapped);
+
+        try {
+          const search = await savePriorArtSearch({
+            patentId: patent.id,
+            query: query.trim(),
+            apiSources: sources,
+            resultCount: data.results.length,
+          });
+          await savePriorArtResults(
+            search.id,
+            patent.id,
+            data.results.map((r: SearchApiResult) => ({
+              externalPatentNumber: r.patentNumber,
+              title: r.title,
+              abstract: r.abstract || undefined,
+              assignee: r.assignee || undefined,
+              filingDate: r.filingDate || undefined,
+              sourceApi: r.sourceApi,
+              externalUrl: r.externalUrl || undefined,
+            }))
+          );
+        } catch {
+          console.error("Failed to persist search results");
+        }
+
+        toast.success(`Found ${data.results.length} results`);
+      } else if (data.results) {
+        setResults([]);
+        toast.info("No results found");
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Search failed";
       setSearchError(message);
-      console.error("Search failed:", err);
+      toast.error(message);
     } finally {
       setSearching(false);
     }
   }
 
-  // ─── Analyze mutation ───────────────────────────────────
+  async function handleViewPatent(result: DisplayResult) {
+    setSelectedResult(result);
+    setSheetMode("view");
+    setSheetOpen(true);
+
+    if (result.viewData) return;
+
+    setViewLoading(true);
+    try {
+      const source = result.sourceApi === "epo" ? "epo" : "auto";
+      const res = await fetch(
+        `/api/patents/view?patentNumber=${encodeURIComponent(result.patentNumber)}&source=${source}`
+      );
+      if (!res.ok) throw new Error("Failed to fetch patent details");
+
+      const data: PatentViewData = await res.json();
+      setResults((prev) =>
+        prev.map((r) =>
+          r.id === result.id ? { ...r, viewData: data, abstract: data.abstract || r.abstract, title: data.title || r.title } : r
+        )
+      );
+      setSelectedResult((prev) =>
+        prev ? { ...prev, viewData: data, abstract: data.abstract || prev.abstract, title: data.title || prev.title } : prev
+      );
+    } catch (err) {
+      toast.error("Failed to load patent details");
+      console.error("View patent error:", err);
+    } finally {
+      setViewLoading(false);
+    }
+  }
 
   const analyzeMutation = useMutation({
     mutationFn: async (result: DisplayResult) => {
       const claimText = buildClaimText(patent);
+      const priorArtAbstract =
+        result.abstract ||
+        result.viewData?.abstract ||
+        result.title;
+
+      if (!priorArtAbstract || priorArtAbstract.length < 5) {
+        throw new Error(
+          "No abstract available. Click 'View' first to load patent details."
+        );
+      }
+
       const res = await fetch("/api/ai/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: patent.aiModelConfig
-            ? (patent.aiModelConfig as { analysisModel: string }).analysisModel
-            : "gemini-2.5-pro",
+          model: (() => {
+            const stored = (patent.aiModelConfig as { analysisModel?: string })?.analysisModel;
+            if (stored && ["gemini-3.1-pro","gemini-2.5-flash","gemini-2.5-pro","gpt-4o-mini","gpt-4o","o3","o4-mini"].includes(stored)) return stored;
+            return "gemini-3.1-pro";
+          })(),
           claimText,
-          priorArtAbstract: result.abstract,
+          priorArtAbstract,
           priorArtTitle: result.title,
           jurisdiction: patent.jurisdiction,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || `Analysis failed (${res.status})`);
+      }
+
       return (await res.json()) as Analysis;
     },
     onMutate: (result) => {
@@ -254,35 +361,37 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
         prev.map((r) => (r.id === result.id ? updated : r))
       );
       setSelectedResult(updated);
+      setSheetMode("analysis");
       setSheetOpen(true);
+      toast.success("Analysis complete");
     },
-    onError: (_err, result) => {
+    onError: (err: Error, result) => {
       setResults((prev) =>
         prev.map((r) =>
           r.id === result.id ? { ...r, analysing: false } : r
         )
       );
+      toast.error(err.message || "Analysis failed");
     },
   });
 
-  // ─── IDS toggle ─────────────────────────────────────────
-
   function toggleIds(resultId: string) {
+    const result = results.find((r) => r.id === resultId);
+    const newValue = !result?.addedToIds;
     setResults((prev) =>
       prev.map((r) =>
-        r.id === resultId ? { ...r, addedToIds: !r.addedToIds } : r
+        r.id === resultId ? { ...r, addedToIds: newValue } : r
       )
     );
+    togglePriorArtIDS(resultId, patent.id, newValue).catch(() => {
+      toast.error("Failed to update IDS status");
+    });
   }
-
-  // ─── Filtered results ───────────────────────────────────
 
   const filteredResults = React.useMemo(() => {
     if (sourceFilter === "all") return results;
     return results.filter((r) => r.sourceApi === sourceFilter);
   }, [results, sourceFilter]);
-
-  // ─── Table columns ─────────────────────────────────────
 
   const columns = React.useMemo<ColumnDef<DisplayResult>[]>(
     () => [
@@ -293,7 +402,9 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
             variant="ghost"
             size="sm"
             className="-ml-3 h-8"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+            onClick={() =>
+              column.toggleSorting(column.getIsSorted() === "asc")
+            }
           >
             Patent Number
             <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
@@ -312,7 +423,9 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
             variant="ghost"
             size="sm"
             className="-ml-3 h-8"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+            onClick={() =>
+              column.toggleSorting(column.getIsSorted() === "asc")
+            }
           >
             Title
             <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
@@ -331,7 +444,9 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
             variant="ghost"
             size="sm"
             className="-ml-3 h-8"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
+            onClick={() =>
+              column.toggleSorting(column.getIsSorted() === "asc")
+            }
           >
             Assignee
             <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
@@ -341,25 +456,6 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
           <div className="max-w-[180px] truncate">
             {row.original.assignee || "—"}
           </div>
-        ),
-      },
-      {
-        accessorKey: "filingDate",
-        header: ({ column }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="-ml-3 h-8"
-            onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-          >
-            Filing Date
-            <ArrowUpDown className="ml-1 h-3.5 w-3.5" />
-          </Button>
-        ),
-        cell: ({ row }) => (
-          <span className="text-xs text-muted-foreground">
-            {row.original.filingDate || "—"}
-          </span>
         ),
       },
       {
@@ -382,7 +478,9 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
           const cfg = RISK_CONFIG[risk];
           return (
             <Badge variant="secondary" className={cfg.className}>
-              {risk === "high" && <AlertTriangle className="h-3 w-3 mr-0.5" />}
+              {risk === "high" && (
+                <AlertTriangle className="h-3 w-3 mr-0.5" />
+              )}
               {risk === "medium" && <Shield className="h-3 w-3 mr-0.5" />}
               {cfg.label}
             </Badge>
@@ -399,9 +497,23 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
               <Button
                 variant="outline"
                 size="sm"
+                className="h-7 text-xs gap-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleViewPatent(r);
+                }}
+              >
+                <Eye className="h-3 w-3" /> View
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 className="h-7 text-xs"
                 disabled={r.analysing || analyzeMutation.isPending}
-                onClick={() => analyzeMutation.mutate(r)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  analyzeMutation.mutate(r);
+                }}
               >
                 {r.analysing ? (
                   <Loader2 className="h-3 w-3 animate-spin" />
@@ -413,7 +525,10 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                 variant={r.addedToIds ? "default" : "ghost"}
                 size="sm"
                 className="h-7 text-xs"
-                onClick={() => toggleIds(r.id)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleIds(r.id);
+                }}
               >
                 {r.addedToIds ? (
                   <>
@@ -429,6 +544,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                 href={r.externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
               >
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -454,8 +570,6 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: 15 } },
   });
-
-  // ─── Render ─────────────────────────────────────────────
 
   return (
     <div className="p-6 space-y-6">
@@ -485,7 +599,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
           <div className="flex gap-3">
             <div className="flex-1">
               <Input
-                placeholder="Search patent databases by keyword, description, or claim language…"
+                placeholder="Search patent databases by keyword, description, or claim language..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
@@ -520,7 +634,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                   setSourcePatentsView(v === true);
                 }}
               />
-              <span className="text-sm">USPTO Data / PatentsView</span>
+              <span className="text-sm">USPTO / PatentsView</span>
             </label>
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
@@ -571,7 +685,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                 className="text-xs border rounded-md px-2 py-1 bg-background"
               >
                 <option value="all">All Sources</option>
-                <option value="patentsview">USPTO Data / PatentsView</option>
+                <option value="patentsview">USPTO / PatentsView</option>
                 <option value="epo">EPO OPS</option>
               </select>
             </div>
@@ -623,12 +737,7 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                         <TableRow
                           key={row.id}
                           className="cursor-pointer"
-                          onClick={() => {
-                            if (row.original.analysis) {
-                              setSelectedResult(row.original);
-                              setSheetOpen(true);
-                            }
-                          }}
+                          onClick={() => handleViewPatent(row.original)}
                         >
                           {row.getVisibleCells().map((cell) => (
                             <TableCell key={cell.id}>
@@ -654,7 +763,6 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
                 </Table>
               </div>
 
-              {/* Pagination */}
               <div className="flex items-center justify-between pt-4">
                 <p className="text-xs text-muted-foreground">
                   Page {table.getState().pagination.pageIndex + 1} of{" "}
@@ -684,147 +792,438 @@ export function PriorArtClient({ patent, initialResults }: PriorArtClientProps) 
         </CardContent>
       </Card>
 
-      {/* Analysis Sheet */}
+      {/* Patent View / Analysis Sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-lg">
+        <SheetContent side="right" className="w-full sm:max-w-2xl">
           <SheetHeader>
-            <SheetTitle className="text-lg">Prior Art Analysis</SheetTitle>
-            <SheetDescription>
-              {selectedResult?.patentNumber} — {selectedResult?.title}
+            <SheetTitle className="text-lg">
+              {selectedResult?.patentNumber}
+            </SheetTitle>
+            <SheetDescription className="line-clamp-2">
+              {selectedResult?.title}
             </SheetDescription>
           </SheetHeader>
 
-          {selectedResult?.analysis ? (
-            <ScrollArea className="flex-1 px-4 pb-6">
-              <div className="space-y-6">
-                {/* Risk + Score */}
-                <div className="flex items-center gap-4">
-                  <Badge
-                    variant="secondary"
-                    className={`text-sm px-3 py-1 ${RISK_CONFIG[selectedResult.analysis.riskLevel].className}`}
-                  >
-                    {selectedResult.analysis.riskLevel === "high" && (
-                      <AlertTriangle className="h-3.5 w-3.5 mr-1" />
-                    )}
-                    {selectedResult.analysis.riskLevel === "medium" && (
-                      <Shield className="h-3.5 w-3.5 mr-1" />
-                    )}
-                    {RISK_CONFIG[selectedResult.analysis.riskLevel].label}
-                  </Badge>
-                </div>
+          {selectedResult && (
+            <div className="mt-4">
+              <Tabs
+                value={sheetMode}
+                onValueChange={(v) => setSheetMode(v as "view" | "analysis")}
+              >
+                <TabsList className="w-full">
+                  <TabsTrigger value="view" className="flex-1 gap-1.5">
+                    <Eye className="h-3.5 w-3.5" /> Patent Details
+                  </TabsTrigger>
+                  <TabsTrigger value="analysis" className="flex-1 gap-1.5">
+                    <Shield className="h-3.5 w-3.5" /> AI Analysis
+                  </TabsTrigger>
+                </TabsList>
 
-                {/* Relevance Score */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium">
-                      Relevance Score
-                    </span>
-                    <span className="text-sm font-mono">
-                      {(selectedResult.analysis.relevanceScore * 100).toFixed(0)}
-                      %
-                    </span>
-                  </div>
-                  <Progress
-                    value={selectedResult.analysis.relevanceScore * 100}
-                  />
-                </div>
+                {/* View Tab */}
+                <TabsContent value="view">
+                  <ScrollArea className="h-[calc(100vh-220px)]">
+                    <div className="space-y-5 pr-4 pb-6">
+                      {viewLoading ? (
+                        <div className="space-y-4 py-8">
+                          <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <span className="text-sm">
+                              Loading patent details...
+                            </span>
+                          </div>
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-3/4" />
+                          <Skeleton className="h-20 w-full" />
+                        </div>
+                      ) : (
+                        <>
+                          {/* Meta info */}
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <span className="text-muted-foreground text-xs">
+                                Patent Number
+                              </span>
+                              <p className="font-mono font-medium">
+                                {selectedResult.patentNumber}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground text-xs">
+                                Filing Date
+                              </span>
+                              <p>
+                                {selectedResult.viewData?.filingDate ||
+                                  selectedResult.filingDate ||
+                                  "—"}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground text-xs">
+                                Assignee
+                              </span>
+                              <p>
+                                {selectedResult.viewData?.assignee ||
+                                  selectedResult.assignee ||
+                                  "—"}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground text-xs">
+                                Source
+                              </span>
+                              <p>
+                                {SOURCE_LABELS[selectedResult.sourceApi] ||
+                                  selectedResult.sourceApi}
+                              </p>
+                            </div>
+                            {selectedResult.viewData?.inventors &&
+                              selectedResult.viewData.inventors.length > 0 && (
+                                <div className="col-span-2">
+                                  <span className="text-muted-foreground text-xs">
+                                    Inventors
+                                  </span>
+                                  <p>
+                                    {selectedResult.viewData.inventors.join(
+                                      ", "
+                                    )}
+                                  </p>
+                                </div>
+                              )}
+                          </div>
 
-                <Separator />
+                          <Separator />
 
-                {/* AI Analysis */}
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Analysis</h4>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {selectedResult.analysis.analysis}
-                  </p>
-                </div>
+                          {/* Abstract */}
+                          <div>
+                            <h4 className="text-sm font-medium mb-2">
+                              Abstract
+                            </h4>
+                            <p className="text-sm text-muted-foreground leading-relaxed">
+                              {selectedResult.viewData?.abstract ||
+                                selectedResult.abstract ||
+                                "No abstract available. Try clicking View to load details."}
+                            </p>
+                          </div>
 
-                <Separator />
+                          {/* Images */}
+                          {selectedResult.viewData?.images &&
+                            selectedResult.viewData.images.length > 0 && (
+                              <>
+                                <Separator />
+                                <div>
+                                  <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                                    <ImageIcon className="h-3.5 w-3.5" />
+                                    Patent Drawings (
+                                    {selectedResult.viewData.images.length})
+                                  </h4>
+                                  <div className="grid grid-cols-2 gap-3">
+                                    {selectedResult.viewData.images.map(
+                                      (img, idx) => (
+                                        <div
+                                          key={idx}
+                                          className="border rounded-lg overflow-hidden bg-white"
+                                        >
+                                          <img
+                                            src={img.url}
+                                            alt={img.label}
+                                            className="w-full h-auto object-contain max-h-48"
+                                            loading="lazy"
+                                          />
+                                          <p className="text-xs text-center py-1 text-muted-foreground bg-muted/30">
+                                            {img.label}
+                                          </p>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              </>
+                            )}
 
-                {/* Overlapping Elements */}
-                {selectedResult.analysis.overlappingElements.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                      Overlapping Elements
-                    </h4>
-                    <ul className="space-y-1.5">
-                      {selectedResult.analysis.overlappingElements.map(
-                        (el, i) => (
-                          <li
-                            key={i}
-                            className="text-sm text-muted-foreground flex items-start gap-2"
+                          {/* Claims */}
+                          {selectedResult.viewData?.claims &&
+                            selectedResult.viewData.claims.length > 0 && (
+                              <>
+                                <Separator />
+                                <div>
+                                  <h4 className="text-sm font-medium mb-2">
+                                    Claims (
+                                    {selectedResult.viewData.claims.length})
+                                  </h4>
+                                  <div className="space-y-2">
+                                    {selectedResult.viewData.claims
+                                      .slice(0, 5)
+                                      .map((claim, idx) => (
+                                        <p
+                                          key={idx}
+                                          className="text-xs text-muted-foreground leading-relaxed border-l-2 pl-3"
+                                        >
+                                          {idx + 1}. {claim}
+                                        </p>
+                                      ))}
+                                    {selectedResult.viewData.claims.length >
+                                      5 && (
+                                      <p className="text-xs text-muted-foreground italic">
+                                        +{" "}
+                                        {selectedResult.viewData.claims.length -
+                                          5}{" "}
+                                        more claims
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </>
+                            )}
+
+                          {/* Description excerpt */}
+                          {selectedResult.viewData?.description && (
+                            <>
+                              <Separator />
+                              <div>
+                                <h4 className="text-sm font-medium mb-2">
+                                  Description (excerpt)
+                                </h4>
+                                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-6">
+                                  {selectedResult.viewData.description}
+                                </p>
+                              </div>
+                            </>
+                          )}
+
+                          <Separator />
+
+                          {/* Actions */}
+                          <div className="flex gap-2">
+                            <Button
+                              className="flex-1"
+                              size="sm"
+                              disabled={
+                                selectedResult.analysing ||
+                                analyzeMutation.isPending
+                              }
+                              onClick={() =>
+                                analyzeMutation.mutate(selectedResult)
+                              }
+                            >
+                              {selectedResult.analysing ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                              ) : (
+                                <Shield className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              Analyze
+                            </Button>
+                            <Button
+                              className="flex-1"
+                              size="sm"
+                              variant={
+                                selectedResult.addedToIds
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              onClick={() => {
+                                toggleIds(selectedResult.id);
+                                setSelectedResult((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        addedToIds: !prev.addedToIds,
+                                      }
+                                    : prev
+                                );
+                              }}
+                            >
+                              <FileText className="h-3.5 w-3.5 mr-1.5" />
+                              {selectedResult.addedToIds
+                                ? "Remove from IDS"
+                                : "Add to IDS"}
+                            </Button>
+                          </div>
+
+                          <a
+                            href={selectedResult.externalUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
                           >
-                            <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                            {el}
-                          </li>
-                        )
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full gap-1.5 text-xs"
+                            >
+                              <ExternalLink className="h-3 w-3" /> Open in
+                              External Source
+                            </Button>
+                          </a>
+                        </>
                       )}
-                    </ul>
-                  </div>
-                )}
+                    </div>
+                  </ScrollArea>
+                </TabsContent>
 
-                {/* Differentiating Features */}
-                {selectedResult.analysis.differentiatingFeatures.length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
-                      <Shield className="h-3.5 w-3.5 text-green-500" />
-                      Differentiating Features
-                    </h4>
-                    <ul className="space-y-1.5">
-                      {selectedResult.analysis.differentiatingFeatures.map(
-                        (el, i) => (
-                          <li
-                            key={i}
-                            className="text-sm text-muted-foreground flex items-start gap-2"
+                {/* Analysis Tab */}
+                <TabsContent value="analysis">
+                  <ScrollArea className="h-[calc(100vh-220px)]">
+                    {selectedResult?.analysis ? (
+                      <div className="space-y-6 pr-4 pb-6">
+                        <div className="flex items-center gap-4">
+                          <Badge
+                            variant="secondary"
+                            className={`text-sm px-3 py-1 ${RISK_CONFIG[selectedResult.analysis.riskLevel].className}`}
                           >
-                            <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
-                            {el}
-                          </li>
-                        )
-                      )}
-                    </ul>
-                  </div>
-                )}
+                            {selectedResult.analysis.riskLevel === "high" && (
+                              <AlertTriangle className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            {selectedResult.analysis.riskLevel === "medium" && (
+                              <Shield className="h-3.5 w-3.5 mr-1" />
+                            )}
+                            {
+                              RISK_CONFIG[selectedResult.analysis.riskLevel]
+                                .label
+                            }
+                          </Badge>
+                        </div>
 
-                <Separator />
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-sm font-medium">
+                              Relevance Score
+                            </span>
+                            <span className="text-sm font-mono">
+                              {(
+                                selectedResult.analysis.relevanceScore * 100
+                              ).toFixed(0)}
+                              %
+                            </span>
+                          </div>
+                          <Progress
+                            value={
+                              selectedResult.analysis.relevanceScore * 100
+                            }
+                          />
+                        </div>
 
-                {/* Recommendation */}
-                <div>
-                  <h4 className="text-sm font-medium mb-2">Recommendation</h4>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {selectedResult.analysis.recommendation}
-                  </p>
-                </div>
+                        <Separator />
 
-                <Separator />
+                        <div>
+                          <h4 className="text-sm font-medium mb-2">
+                            Analysis
+                          </h4>
+                          <p className="text-sm text-muted-foreground leading-relaxed">
+                            {selectedResult.analysis.analysis}
+                          </p>
+                        </div>
 
-                {/* Add to IDS */}
-                <Button
-                  className="w-full"
-                  variant={selectedResult.addedToIds ? "secondary" : "default"}
-                  onClick={() => {
-                    toggleIds(selectedResult.id);
-                    setSelectedResult((prev) =>
-                      prev
-                        ? { ...prev, addedToIds: !prev.addedToIds }
-                        : prev
-                    );
-                  }}
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  {selectedResult.addedToIds
-                    ? "Remove from IDS"
-                    : "Add to IDS"}
-                </Button>
-              </div>
-            </ScrollArea>
-          ) : (
-            <div className="flex flex-col items-center justify-center flex-1 py-12">
-              <Search className="h-10 w-10 text-muted-foreground/40 mb-3" />
-              <p className="text-sm text-muted-foreground">
-                Click &ldquo;Analyze&rdquo; on a result to see the AI analysis.
-              </p>
+                        <Separator />
+
+                        {selectedResult.analysis.overlappingElements.length >
+                          0 && (
+                          <div>
+                            <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                              Overlapping Elements
+                            </h4>
+                            <ul className="space-y-1.5">
+                              {selectedResult.analysis.overlappingElements.map(
+                                (el, i) => (
+                                  <li
+                                    key={i}
+                                    className="text-sm text-muted-foreground flex items-start gap-2"
+                                  >
+                                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                                    {el}
+                                  </li>
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        {selectedResult.analysis.differentiatingFeatures
+                          .length > 0 && (
+                          <div>
+                            <h4 className="text-sm font-medium mb-2 flex items-center gap-1.5">
+                              <Shield className="h-3.5 w-3.5 text-green-500" />
+                              Differentiating Features
+                            </h4>
+                            <ul className="space-y-1.5">
+                              {selectedResult.analysis.differentiatingFeatures.map(
+                                (el, i) => (
+                                  <li
+                                    key={i}
+                                    className="text-sm text-muted-foreground flex items-start gap-2"
+                                  >
+                                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-green-500 shrink-0" />
+                                    {el}
+                                  </li>
+                                )
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        <Separator />
+
+                        <div>
+                          <h4 className="text-sm font-medium mb-2">
+                            Recommendation
+                          </h4>
+                          <p className="text-sm text-muted-foreground leading-relaxed">
+                            {selectedResult.analysis.recommendation}
+                          </p>
+                        </div>
+
+                        <Separator />
+
+                        <Button
+                          className="w-full"
+                          variant={
+                            selectedResult.addedToIds ? "secondary" : "default"
+                          }
+                          onClick={() => {
+                            toggleIds(selectedResult.id);
+                            setSelectedResult((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    addedToIds: !prev.addedToIds,
+                                  }
+                                : prev
+                            );
+                          }}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          {selectedResult.addedToIds
+                            ? "Remove from IDS"
+                            : "Add to IDS"}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-12">
+                        <Shield className="h-10 w-10 text-muted-foreground/40 mb-3" />
+                        <p className="text-sm text-muted-foreground mb-4">
+                          No analysis yet for this patent.
+                        </p>
+                        <Button
+                          size="sm"
+                          disabled={
+                            selectedResult.analysing ||
+                            analyzeMutation.isPending
+                          }
+                          onClick={() =>
+                            analyzeMutation.mutate(selectedResult)
+                          }
+                        >
+                          {selectedResult.analysing ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                          ) : (
+                            <Shield className="h-3.5 w-3.5 mr-1.5" />
+                          )}
+                          Run AI Analysis
+                        </Button>
+                      </div>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
+              </Tabs>
             </div>
           )}
         </SheetContent>

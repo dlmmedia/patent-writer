@@ -11,9 +11,5 @@ export default async function EditorPage({
   const patent = await getPatent(id);
   if (!patent) notFound();
 
-  return (
-    <div className="flex h-full w-full min-h-0 min-w-0 overflow-hidden">
-      <PatentEditorClient patent={patent} />
-    </div>
-  );
+  return <PatentEditorClient patent={patent} />;
 }

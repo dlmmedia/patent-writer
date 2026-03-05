@@ -1,20 +1,16 @@
 import { getPatent } from "@/lib/actions/patents";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { PatentNav } from "./patent-nav";
-import type { Jurisdiction } from "@/lib/types";
-import { JURISDICTION_LABELS } from "@/lib/types";
+import { PatentNav } from "@/components/patent-nav";
+import { PatentWorkspaceShell } from "@/components/patent-workspace-shell";
 
-const statusVariant: Record<string, string> = {
-  draft: "bg-muted text-muted-foreground",
-  in_progress: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  review:
-    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  ready_to_file:
-    "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  filed:
-    "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-  abandoned: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  in_progress: "In Progress",
+  review: "Under Review",
+  ready_to_file: "Ready to File",
+  filed: "Filed",
+  abandoned: "Abandoned",
 };
 
 export default async function PatentLayout({
@@ -25,44 +21,40 @@ export default async function PatentLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-
   const patent = await getPatent(id);
-  if (!patent) notFound();
 
-  const tabs = [
-    { label: "Overview", href: `/patents/${id}` },
-    { label: "Editor", href: `/patents/${id}/editor` },
-    { label: "Claims", href: `/patents/${id}/claims` },
-    { label: "Drawings", href: `/patents/${id}/drawings` },
-    { label: "Prior Art", href: `/patents/${id}/prior-art` },
-    { label: "Export", href: `/patents/${id}/export` },
-    { label: "Config", href: `/patents/${id}/config` },
-  ];
+  if (!patent) {
+    notFound();
+  }
+
+  const sectionCount = patent.sections?.length || 0;
+  const completedSections = patent.sections?.filter((s) => s.plainText && s.plainText.length > 10).length || 0;
+  const claimCount = patent.claims?.length || 0;
+  const drawingCount = patent.drawings?.length || 0;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="px-6 pt-4 pb-0">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <h1 className="heading-serif text-lg font-semibold truncate max-w-[500px]">
-                {patent.title}
-              </h1>
-              <Badge className={statusVariant[patent.status] || ""}>
-                {patent.status.replace(/_/g, " ")}
-              </Badge>
-              <Badge variant="outline">{patent.type.toUpperCase()}</Badge>
-              <Badge variant="outline">
-                {JURISDICTION_LABELS[
-                  patent.jurisdiction as Jurisdiction
-                ]?.split(" (")[0] || patent.jurisdiction}
-              </Badge>
+    <div className="flex flex-col h-full">
+      <div className="border-b px-6 py-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-semibold truncate">{patent.title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <Badge variant="outline" className="text-xs">{STATUS_LABELS[patent.status] || patent.status}</Badge>
+              <Badge variant="secondary" className="text-xs capitalize">{patent.type}</Badge>
+              <Badge variant="secondary" className="text-xs">{patent.jurisdiction}</Badge>
+              <span className="text-xs text-muted-foreground">
+                {completedSections}/{sectionCount} sections
+              </span>
+              <span className="text-xs text-muted-foreground">{claimCount} claims</span>
+              <span className="text-xs text-muted-foreground">{drawingCount} drawings</span>
             </div>
           </div>
-          <PatentNav tabs={tabs} />
         </div>
+        <PatentNav patentId={id} />
       </div>
-      <div className="flex-1 relative min-h-0 min-w-0 w-full overflow-hidden">{children}</div>
+      <PatentWorkspaceShell patentId={id}>
+        {children}
+      </PatentWorkspaceShell>
     </div>
   );
 }

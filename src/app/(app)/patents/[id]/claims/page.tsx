@@ -11,9 +11,5 @@ export default async function ClaimsPage({
   const patent = await getPatent(id);
   if (!patent) notFound();
 
-  return (
-    <div className="flex h-full w-full min-h-0 min-w-0 overflow-hidden">
-      <ClaimsBuilderClient patent={patent} />
-    </div>
-  );
+  return <ClaimsBuilderClient patent={patent} />;
 }

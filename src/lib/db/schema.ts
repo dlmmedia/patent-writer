@@ -87,10 +87,10 @@ export const patents = pgTable("patents", {
     analysisModel: string;
     imageModel: string;
   }>().default({
-    draftingModel: "gemini-2.5-flash",
-    claimsModel: "gpt-5.2",
-    analysisModel: "gemini-2.5-pro",
-    imageModel: "gemini-3-pro-image",
+    draftingModel: "gemini-3.1-pro",
+    claimsModel: "gemini-3.1-pro",
+    analysisModel: "gemini-3.1-pro",
+    imageModel: "nano-banana-2",
   }),
   technologyArea: text("technology_area"),
   inventors: jsonb("inventors").$type<{ name: string; address?: string }[]>().default([]),
@@ -166,6 +166,21 @@ export const patentDrawings = pgTable("patent_drawings", {
   isCompliant: boolean("is_compliant").default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Patent Reference Documents ──────────────────────────────
+
+export const patentDocuments = pgTable("patent_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patentId: uuid("patent_id")
+    .notNull()
+    .references(() => patents.id, { onDelete: "cascade" }),
+  fileName: text("file_name").notNull(),
+  fileType: text("file_type").notNull(),
+  fileSize: integer("file_size").notNull(),
+  extractedText: text("extracted_text"),
+  summary: text("summary"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // ─── Reference Numerals ──────────────────────────────────────
@@ -268,6 +283,7 @@ export const patentsRelations = relations(patents, ({ many }) => ({
   sections: many(patentSections),
   claims: many(patentClaims),
   drawings: many(patentDrawings),
+  documents: many(patentDocuments),
   referenceNumerals: many(referenceNumerals),
   priorArtSearches: many(priorArtSearches),
   versions: many(patentVersions),
@@ -289,6 +305,13 @@ export const patentClaimsRelations = relations(patentClaims, ({ one }) => ({
   parentClaim: one(patentClaims, {
     fields: [patentClaims.parentClaimId],
     references: [patentClaims.id],
+  }),
+}));
+
+export const patentDocumentsRelations = relations(patentDocuments, ({ one }) => ({
+  patent: one(patents, {
+    fields: [patentDocuments.patentId],
+    references: [patents.id],
   }),
 }));
 

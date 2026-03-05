@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import JSZip from "jszip";
 import type { Patent, PatentDrawing, ReferenceNumeral } from "@/lib/types";
 import { createReferenceNumeral, createDrawing, updateDrawing } from "@/lib/actions/patents";
 import {
@@ -46,6 +47,7 @@ import {
   Pencil,
   ZoomIn,
   Trash2,
+  Archive,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -66,7 +68,7 @@ const DRAWING_TYPE_LABELS: Record<DrawingType, string> = {
   perspective_view: "Perspective View",
 };
 
-type ImageModelId = "gemini-3-pro-image" | "gemini-2.5-flash-image" | "imagen-4" | "gpt-image-1";
+type ImageModelId = "nano-banana-2" | "gemini-2.5-flash-image" | "imagen-4" | "gpt-image-1";
 
 interface PlacedNumeral {
   id: string;
@@ -101,7 +103,11 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
   // AI generation state
   const [generateOpen, setGenerateOpen] = useState(false);
   const [genDescription, setGenDescription] = useState("");
-  const [genModel, setGenModel] = useState<ImageModelId>("gemini-3-pro-image");
+  const [genModel, setGenModel] = useState<ImageModelId>(() => {
+    const stored = patent.aiModelConfig?.imageModel;
+    if (stored && ["nano-banana-2","gemini-2.5-flash-image","imagen-4","gpt-image-1"].includes(stored as string)) return stored as ImageModelId;
+    return "nano-banana-2";
+  });
   const [genType, setGenType] = useState<DrawingType>("block_diagram");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -360,6 +366,53 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
     toast.success("Image downloaded.");
   }, [selectedDrawing]);
 
+  const [isExportingZip, setIsExportingZip] = useState(false);
+
+  const handleExportZip = useCallback(async () => {
+    const withImages = drawings.filter((d) => d.originalUrl);
+    if (withImages.length === 0) {
+      toast.error("No drawings to export.");
+      return;
+    }
+
+    setIsExportingZip(true);
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder("patent-drawings")!;
+
+      await Promise.all(
+        withImages.map(async (drawing) => {
+          const url = drawing.originalUrl!;
+          let blob: Blob;
+
+          if (url.startsWith("data:")) {
+            const res = await fetch(url);
+            blob = await res.blob();
+          } else {
+            const res = await fetch(url);
+            blob = await res.blob();
+          }
+
+          const ext = blob.type === "image/jpeg" ? "jpg" : "png";
+          folder.file(`FIG_${drawing.figureNumber}.${ext}`, blob);
+        })
+      );
+
+      const content = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${patent.title?.replace(/[^a-zA-Z0-9]/g, "_") ?? "patent"}_drawings.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${withImages.length} drawing${withImages.length !== 1 ? "s" : ""} as ZIP.`);
+    } catch {
+      toast.error("Failed to create ZIP archive.");
+    } finally {
+      setIsExportingZip(false);
+    }
+  }, [drawings, patent.title]);
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -381,6 +434,16 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
           <Badge variant="outline">
             {numerals.length} numeral{numerals.length !== 1 && "s"}
           </Badge>
+          {drawings.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={handleExportZip}
+              disabled={isExportingZip}
+            >
+              <Archive className="h-4 w-4 mr-2" />
+              {isExportingZip ? "Exporting..." : "Export All (ZIP)"}
+            </Button>
+          )}
           <Dialog open={generateOpen} onOpenChange={setGenerateOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -421,9 +484,7 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="gemini-3-pro-image">
-                          Gemini 3 Pro Image
-                        </SelectItem>
+                        <SelectItem value="nano-banana-2">Nano Banana 2 (Google)</SelectItem>
                         <SelectItem value="gemini-2.5-flash-image">
                           Gemini 2.5 Flash Image
                         </SelectItem>

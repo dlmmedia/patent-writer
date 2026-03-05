@@ -1,7 +1,11 @@
 import { generateImage } from "ai";
-import { getImageModel, type ImageModelId, imageModels } from "@/lib/ai/providers";
-
-const GOOGLE_MODELS: ImageModelId[] = ["gemini-3-pro-image", "gemini-2.5-flash-image", "imagen-4"];
+import {
+  getImageModel,
+  type ImageModelId,
+  IMAGE_MODEL_PROVIDER_MAP,
+  isGoogleImageModel,
+  isOpenAIImageModel,
+} from "@/lib/ai/providers";
 
 export async function POST(req: Request) {
   try {
@@ -14,24 +18,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const modelId = (model || "gemini-3-pro-image") as ImageModelId;
-    if (!(modelId in imageModels)) {
+    const modelId = (model || "nano-banana-2") as ImageModelId;
+    if (!(modelId in IMAGE_MODEL_PROVIDER_MAP)) {
       return Response.json(
-        { error: `Invalid image model "${model}". Valid models: ${Object.keys(imageModels).join(", ")}` },
+        { error: `Invalid image model "${model}". Valid models: ${Object.keys(IMAGE_MODEL_PROVIDER_MAP).join(", ")}` },
         { status: 400 }
       );
     }
 
-    const isOpenAI = modelId === "gpt-image-1";
-    const isGoogle = GOOGLE_MODELS.includes(modelId);
-
-    if (isOpenAI && !process.env.OPENAI_API_KEY) {
+    if (isOpenAIImageModel(modelId) && !process.env.OPENAI_API_KEY) {
       return Response.json(
         { error: "OpenAI API key is not configured. Go to Settings to check your API keys." },
         { status: 400 }
       );
     }
-    if (isGoogle && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    if (isGoogleImageModel(modelId) && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
       return Response.json(
         { error: "Google AI API key is not configured. Go to Settings to check your API keys." },
         { status: 400 }
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
       prompt: fullPrompt,
     };
 
-    if (isOpenAI) {
+    if (isOpenAIImageModel(modelId)) {
       generateOptions.size = "1024x1024";
     } else {
       generateOptions.aspectRatio = "1:1";

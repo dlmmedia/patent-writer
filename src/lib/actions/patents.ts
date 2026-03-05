@@ -6,10 +6,12 @@ import {
   patentSections,
   patentClaims,
   patentDrawings,
+  patentDocuments,
   referenceNumerals,
   priorArtSearches,
   priorArtResults,
   patentVersions,
+  templates,
 } from "@/lib/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
 import type {
@@ -37,6 +39,7 @@ export async function getPatent(id: string) {
       sections: { orderBy: [asc(patentSections.orderIndex)] },
       claims: { orderBy: [asc(patentClaims.claimNumber)] },
       drawings: { orderBy: [asc(patentDrawings.figureNumber)] },
+      documents: true,
       referenceNumerals: { orderBy: [asc(referenceNumerals.numeral)] },
     },
   });
@@ -49,6 +52,7 @@ export async function createPatent(data: {
   inventionDescription?: string;
   technologyArea?: string;
   entitySize?: "micro" | "small" | "large";
+  cpcCodes?: string[];
   aiModelConfig?: {
     draftingModel: string;
     claimsModel: string;
@@ -212,6 +216,29 @@ export async function deleteDrawing(id: string, patentId: string) {
   revalidatePath(`/patents/${patentId}/drawings`);
 }
 
+export async function deleteAllDrawings(patentId: string) {
+  await db
+    .delete(referenceNumerals)
+    .where(eq(referenceNumerals.patentId, patentId));
+  await db
+    .delete(patentDrawings)
+    .where(eq(patentDrawings.patentId, patentId));
+  revalidatePath(`/patents/${patentId}/drawings`);
+}
+
+export async function bulkCreateReferenceNumerals(
+  patentId: string,
+  numerals: { numeral: number; elementName: string; description?: string; firstFigureId?: string }[]
+) {
+  if (numerals.length === 0) return [];
+  const values = numerals.map((n) => ({ patentId, ...n }));
+  const inserted = await db
+    .insert(referenceNumerals)
+    .values(values)
+    .returning();
+  return inserted;
+}
+
 export async function getReferenceNumerals(patentId: string) {
   return db.query.referenceNumerals.findMany({
     where: eq(referenceNumerals.patentId, patentId),
@@ -287,4 +314,132 @@ export async function getDashboardStats() {
 
 export async function checkApiKeyStatus(envVarName: string): Promise<boolean> {
   return !!process.env[envVarName];
+}
+
+export async function savePriorArtSearch(data: {
+  patentId: string;
+  query: string;
+  apiSources: string[];
+  resultCount: number;
+}) {
+  const [search] = await db.insert(priorArtSearches).values(data).returning();
+  revalidatePath(`/patents/${data.patentId}/prior-art`);
+  return search;
+}
+
+export async function savePriorArtResults(
+  searchId: string,
+  patentId: string,
+  results: {
+    externalPatentNumber?: string;
+    title: string;
+    abstract?: string;
+    assignee?: string;
+    filingDate?: string;
+    relevanceScore?: number;
+    riskLevel?: "high" | "medium" | "low";
+    sourceApi: string;
+    externalUrl?: string;
+  }[]
+) {
+  if (results.length === 0) return [];
+
+  const values = results.map((r) => ({
+    searchId,
+    patentId,
+    ...r,
+  }));
+
+  const inserted = await db.insert(priorArtResults).values(values).returning();
+  revalidatePath(`/patents/${patentId}/prior-art`);
+  return inserted;
+}
+
+export async function deletePriorArtResult(id: string, patentId: string) {
+  await db.delete(priorArtResults).where(eq(priorArtResults.id, id));
+  revalidatePath(`/patents/${patentId}/prior-art`);
+}
+
+export async function togglePriorArtIDS(id: string, patentId: string, addedToIds: boolean) {
+  const [updated] = await db
+    .update(priorArtResults)
+    .set({ addedToIds })
+    .where(eq(priorArtResults.id, id))
+    .returning();
+  revalidatePath(`/patents/${patentId}/prior-art`);
+  return updated;
+}
+
+export async function getPriorArtSearches(patentId: string) {
+  return db.query.priorArtSearches.findMany({
+    where: eq(priorArtSearches.patentId, patentId),
+    orderBy: [desc(priorArtSearches.createdAt)],
+    with: {
+      results: true,
+    },
+  });
+}
+
+// ─── Templates ────────────────────────────────────────────────
+
+export async function getTemplates() {
+  return db.query.templates.findMany({
+    orderBy: [desc(templates.createdAt)],
+  });
+}
+
+export async function createTemplate(data: {
+  name: string;
+  jurisdiction?: "US" | "EP" | "JP" | "CN" | "PCT" | "KR" | "AU" | "CA" | "GB";
+  patentType?: "utility" | "design" | "provisional" | "pct";
+  technologyArea?: string;
+  sectionTemplates?: { sectionType: string; title: string; placeholder: string }[];
+  claimTemplates?: { claimType: string; template: string }[];
+}) {
+  const [template] = await db.insert(templates).values(data).returning();
+  revalidatePath("/templates");
+  return template;
+}
+
+export async function deleteTemplate(id: string) {
+  await db.delete(templates).where(eq(templates.id, id));
+  revalidatePath("/templates");
+}
+
+// ─── Reference Documents ──────────────────────────────────────
+
+export async function getDocuments(patentId: string) {
+  return db.query.patentDocuments.findMany({
+    where: eq(patentDocuments.patentId, patentId),
+    orderBy: [desc(patentDocuments.createdAt)],
+  });
+}
+
+export async function createDocument(data: {
+  patentId: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  extractedText: string;
+  summary?: string;
+}) {
+  const [doc] = await db.insert(patentDocuments).values(data).returning();
+  revalidatePath(`/patents/${data.patentId}`);
+  return doc;
+}
+
+export async function deleteDocument(id: string, patentId: string) {
+  await db.delete(patentDocuments).where(eq(patentDocuments.id, id));
+  revalidatePath(`/patents/${patentId}`);
+}
+
+export async function getDocumentTexts(patentId: string): Promise<string> {
+  const docs = await db.query.patentDocuments.findMany({
+    where: eq(patentDocuments.patentId, patentId),
+  });
+  if (docs.length === 0) return "";
+  return docs
+    .filter((d) => d.extractedText && d.extractedText.trim().length > 0)
+    .map((d) => `--- REFERENCE: ${d.fileName} ---\n${d.extractedText}`)
+    .join("\n\n");
 }

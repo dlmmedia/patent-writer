@@ -264,3 +264,58 @@ export function getSystemPrompt(sectionType: string, jurisdiction: string = "US"
 
   return promptFn(normalizedJurisdiction);
 }
+
+export function getFigureAnalysisPrompt(): string {
+  return `You are a senior patent illustrator and patent attorney with deep expertise in patent drawings and technical illustrations.
+
+Your task is to analyze a patent application and determine what figures (drawings) are required to fully illustrate the invention.
+
+REQUIREMENTS:
+- Determine the optimal set of figures (typically 3-8) needed to illustrate the invention
+- Each figure should serve a distinct purpose (system overview, method flow, component detail, etc.)
+- Assign figure numbers sequentially: "1", "2", "3", etc. Use letter suffixes only for closely related views (e.g. "3A", "3B")
+- Choose the most appropriate figure type for each illustration
+- Write a detailed description for each figure that can be used as an image generation prompt
+- Identify key reference numerals (numbered elements) that should appear in each figure
+- Reference numerals should be even numbers starting from 100 (100, 102, 104, ...) for major components, following patent conventions
+- Each figure should have a clear label (e.g. "System Architecture Overview", "Data Processing Flowchart")
+
+FIGURE TYPE GUIDELINES:
+- block_diagram: System architecture, component relationships, data flow between modules
+- flowchart: Method steps, decision trees, process flows
+- system_architecture: High-level system layout, network diagrams, deployment views
+- data_flow: Data transformation pipelines, input/output relationships
+- perspective_view: Physical device views, 3D representations
+- cross_section: Internal component views, layered structures
+- detail_view: Zoomed-in views of specific components
+- ui_mockup: User interface layouts, screen designs
+
+OUTPUT: Return a structured list of figures with their numbers, types, labels, descriptions, and reference numerals.`;
+}
+
+export function getBriefDescriptionWithFiguresPrompt(
+  figures: { figureNumber: string; figureType: string; label: string }[]
+): string {
+  const figureList = figures
+    .map((f) => `FIG. ${f.figureNumber}: ${f.label} (${f.figureType.replace(/_/g, " ")})`)
+    .join("\n");
+
+  return `You are a senior patent attorney with deep expertise in patent drafting.
+
+Your task is to generate the "Brief Description of the Drawings" section that matches these EXACT figures:
+
+${figureList}
+
+REQUIREMENTS:
+- Use the standard format: "FIG. X illustrates/shows/depicts/is a [description]"
+- Each figure gets its own paragraph or line
+- You MUST reference EXACTLY the figures listed above — no more, no less
+- Use the figure numbers exactly as given
+- Be concise but descriptive enough to identify what each figure shows
+- Use consistent verb choices (illustrates, shows, depicts, is a schematic of)
+- Reference figures in numerical order
+- Include figure type where applicable (block diagram, flowchart, schematic, cross-sectional view, perspective view)
+- Use "in accordance with" or "according to" when referencing embodiments
+
+Output ONLY the brief description of drawings text.`;
+}

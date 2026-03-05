@@ -19,8 +19,6 @@ import { LinkPlugin } from "@udecode/plate-link/react";
 import { HorizontalRulePlugin } from "@udecode/plate-horizontal-rule/react";
 import { NodeIdPlugin } from "@udecode/plate-node-id";
 import { EditorToolbar } from "./editor-toolbar";
-import { cn } from "@/lib/utils";
-import { SECTION_LABELS } from "@/lib/types";
 import type { SectionType } from "@/lib/types";
 
 interface PatentEditorProps {
@@ -103,7 +101,6 @@ export const PatentEditor = forwardRef<PatentEditorHandle, PatentEditorProps>(
                   children: [{ text: para.trim() }],
                 }))
               : DEFAULT_VALUE;
-
           editor.tf.removeNodes({ at: [], mode: "highest", match: () => true });
           editor.tf.insertNodes(nodes, { at: [0] });
         },
@@ -115,33 +112,18 @@ export const PatentEditor = forwardRef<PatentEditorHandle, PatentEditorProps>(
       SECTION_PLACEHOLDERS[sectionType as SectionType] ?? "Start writing...";
 
     return (
-      <div className="flex flex-col rounded-md border bg-background">
-        <Plate
-          editor={editor}
-          onChange={({ value }) => onChange?.(value)}
+      <Plate
+        editor={editor}
+        onChange={({ value }) => onChange?.(value)}
+        readOnly={readOnly}
+      >
+        {!readOnly && <EditorToolbar />}
+        <PlateContent
+          className="min-h-[400px] p-4 focus:outline-none prose prose-sm dark:prose-invert max-w-none"
+          placeholder={placeholder}
           readOnly={readOnly}
-        >
-          {!readOnly && <EditorToolbar />}
-          <PlateContent
-            className={cn(
-              "min-h-[500px] p-6 focus:outline-none",
-              "prose prose-sm dark:prose-invert max-w-none",
-              "[&_p]:relative [&_p]:pl-16",
-              "[counter-reset:patent-para]",
-              "[&_p]:[counter-increment:patent-para]",
-              "[&_p]:before:absolute [&_p]:before:left-0 [&_p]:before:top-0",
-              "[&_p]:before:content-['['_counter(patent-para,decimal-leading-zero)_']']",
-              "[&_p]:before:text-xs [&_p]:before:text-muted-foreground [&_p]:before:font-mono",
-              "[&_p]:before:w-14 [&_p]:before:text-right",
-              "[&_h1]:pl-16 [&_h2]:pl-16 [&_h3]:pl-16",
-              "[&_blockquote]:pl-16 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30",
-              "[&_ul]:pl-20 [&_ol]:pl-20"
-            )}
-            placeholder={placeholder}
-            readOnly={readOnly}
-          />
-        </Plate>
-      </div>
+        />
+      </Plate>
     );
   }
 );

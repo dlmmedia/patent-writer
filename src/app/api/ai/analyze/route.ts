@@ -1,6 +1,12 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, type ModelId, models } from "@/lib/ai/providers";
+import {
+  getModel,
+  type ModelId,
+  MODEL_PROVIDER_MAP,
+  isGoogleModel,
+  isOpenAIModel,
+} from "@/lib/ai/providers";
 
 const analysisSchema = z.object({
   riskLevel: z.enum(["high", "medium", "low"]),
@@ -16,10 +22,23 @@ export async function POST(req: Request) {
     const { model, claimText, priorArtAbstract, priorArtTitle, jurisdiction } =
       await req.json();
 
-    const modelId = model as ModelId;
-    if (!(modelId in models)) {
+    const modelId = (model || "gemini-3.1-pro") as ModelId;
+    if (!(modelId in MODEL_PROVIDER_MAP)) {
       return Response.json(
-        { error: `Invalid model "${model}".` },
+        { error: `Invalid model "${model}". Valid models: ${Object.keys(MODEL_PROVIDER_MAP).join(", ")}` },
+        { status: 400 }
+      );
+    }
+
+    if (isOpenAIModel(modelId) && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OpenAI API key is not configured." },
+        { status: 400 }
+      );
+    }
+    if (isGoogleModel(modelId) && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      return Response.json(
+        { error: "Google AI API key is not configured." },
         { status: 400 }
       );
     }

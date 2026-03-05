@@ -123,9 +123,11 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
     () => new Set(claims.filter((c) => c.isIndependent).map((c) => c.id))
   );
 
-  const [aiModel, setAiModel] = useState(
-    patent.aiModelConfig?.claimsModel ?? "gpt-5.2"
-  );
+  const [aiModel, setAiModel] = useState(() => {
+    const stored = patent.aiModelConfig?.claimsModel;
+    if (stored && ["gemini-3.1-pro","gemini-2.5-flash","gemini-2.5-pro","gpt-4o-mini","gpt-4o","o3","o4-mini"].includes(stored)) return stored;
+    return "gemini-3.1-pro";
+  });
   const [aiClaimType, setAiClaimType] = useState<ClaimType>("method");
   const [aiClaimCount, setAiClaimCount] = useState("3");
   const [aiInstructions, setAiInstructions] = useState("");
@@ -139,6 +141,9 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
       transitionalPhrase: string;
     }>
   >([]);
+  const [expandedPreviews, setExpandedPreviews] = useState<Set<number>>(
+    () => new Set()
+  );
 
   const [editForm, setEditForm] = useState<{
     claimType: ClaimType;
@@ -322,6 +327,7 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
 
     setIsGenerating(true);
     setGeneratedClaims([]);
+    setExpandedPreviews(new Set());
     try {
       const response = await fetch("/api/ai/claims", {
         method: "POST",
@@ -980,10 +986,12 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
                       {generatedClaims.length > 0 && (
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              {generatedClaims.length} generated -- review and
-                              add
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <Eye className="size-3.5 text-muted-foreground" />
+                              <p className="text-xs font-medium">
+                                Preview ({generatedClaims.length} generated)
+                              </p>
+                            </div>
                             <Button
                               variant="outline"
                               size="sm"
@@ -993,51 +1001,91 @@ export function ClaimsBuilderClient({ patent }: ClaimsBuilderClientProps) {
                               Add All
                             </Button>
                           </div>
-                          {generatedClaims.map((generated, idx) => (
-                            <div
-                              key={idx}
-                              className="rounded-md border p-3 space-y-2"
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <Badge
-                                    variant="outline"
-                                    className={`text-[10px] ${CLAIM_TYPE_COLORS[generated.claimType] ?? ""}`}
-                                  >
-                                    {CLAIM_TYPE_LABELS[generated.claimType] ??
-                                      generated.claimType}
-                                  </Badge>
-                                  <Badge
-                                    variant={
-                                      generated.isIndependent
-                                        ? "default"
-                                        : "secondary"
-                                    }
-                                    className="text-[10px]"
-                                  >
-                                    {generated.isIndependent
-                                      ? "Independent"
-                                      : "Dependent"}
-                                  </Badge>
+                          {generatedClaims.map((generated, idx) => {
+                            const isPreviewExpanded = expandedPreviews.has(idx);
+                            const fullText = [
+                              generated.preamble,
+                              generated.transitionalPhrase,
+                              generated.body,
+                            ]
+                              .filter(Boolean)
+                              .join(" ");
+
+                            return (
+                              <div
+                                key={idx}
+                                className="rounded-md border bg-muted/20 p-3 space-y-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={`text-[10px] ${CLAIM_TYPE_COLORS[generated.claimType] ?? ""}`}
+                                    >
+                                      {CLAIM_TYPE_LABELS[
+                                        generated.claimType
+                                      ] ?? generated.claimType}
+                                    </Badge>
+                                    <Badge
+                                      variant={
+                                        generated.isIndependent
+                                          ? "default"
+                                          : "secondary"
+                                      }
+                                      className="text-[10px]"
+                                    >
+                                      {generated.isIndependent
+                                        ? "Independent"
+                                        : "Dependent"}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() =>
+                                        setExpandedPreviews((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(idx)) {
+                                            next.delete(idx);
+                                          } else {
+                                            next.add(idx);
+                                          }
+                                          return next;
+                                        })
+                                      }
+                                    >
+                                      <Eye className="mr-1 size-3" />
+                                      {isPreviewExpanded
+                                        ? "Collapse"
+                                        : "Preview"}
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() =>
+                                        handleAddGenerated(generated)
+                                      }
+                                    >
+                                      <Plus className="mr-1 size-3" />
+                                      Add
+                                    </Button>
+                                  </div>
                                 </div>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() =>
-                                    handleAddGenerated(generated)
-                                  }
-                                >
-                                  <Plus className="mr-1 size-3" />
-                                  Add
-                                </Button>
+                                {isPreviewExpanded ? (
+                                  <div className="rounded-md border bg-background p-3">
+                                    <p className="text-xs leading-relaxed whitespace-pre-wrap">
+                                      {fullText}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                                    {fullText}
+                                  </p>
+                                )}
                               </div>
-                              <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">
-                                {generated.preamble}{" "}
-                                {generated.transitionalPhrase}{" "}
-                                {generated.body}
-                              </p>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </CardContent>
@@ -1132,21 +1180,26 @@ function ClaimTreeNode({
         </div>
       </button>
 
-      {hasChildren &&
-        isExpanded &&
-        children.map((child) => (
-          <ClaimTreeNode
-            key={child.id}
-            claim={child}
-            children={childrenMap.get(child.id) ?? []}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            childrenMap={childrenMap}
-            expandedNodes={expandedNodes}
-            onToggleExpand={onToggleExpand}
-            depth={depth + 1}
-          />
-        ))}
+      {hasChildren && isExpanded && (
+        <div
+          className="border-l-2 border-muted-foreground/20"
+          style={{ marginLeft: `${22 + depth * 20}px` }}
+        >
+          {children.map((child) => (
+            <ClaimTreeNode
+              key={child.id}
+              claim={child}
+              children={childrenMap.get(child.id) ?? []}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              childrenMap={childrenMap}
+              expandedNodes={expandedNodes}
+              onToggleExpand={onToggleExpand}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

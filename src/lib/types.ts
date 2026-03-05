@@ -4,6 +4,7 @@ import type {
   patentSections,
   patentClaims,
   patentDrawings,
+  patentDocuments,
   referenceNumerals,
   priorArtSearches,
   priorArtResults,
@@ -23,6 +24,9 @@ export type NewPatentClaim = InferInsertModel<typeof patentClaims>;
 
 export type PatentDrawing = InferSelectModel<typeof patentDrawings>;
 export type NewPatentDrawing = InferInsertModel<typeof patentDrawings>;
+
+export type PatentDocument = InferSelectModel<typeof patentDocuments>;
+export type NewPatentDocument = InferInsertModel<typeof patentDocuments>;
 
 export type ReferenceNumeral = InferSelectModel<typeof referenceNumerals>;
 export type NewReferenceNumeral = InferInsertModel<typeof referenceNumerals>;
@@ -99,5 +103,6 @@ export type PatentWithRelations = Patent & {
   sections: PatentSection[];
   claims: PatentClaim[];
   drawings: PatentDrawing[];
+  documents: PatentDocument[];
   referenceNumerals: ReferenceNumeral[];
 };

@@ -1,6 +1,12 @@
 import { generateObject } from "ai";
 import { z } from "zod";
-import { getModel, type ModelId } from "@/lib/ai/providers";
+import {
+  getModel,
+  type ModelId,
+  MODEL_PROVIDER_MAP,
+  isGoogleModel,
+  isOpenAIModel,
+} from "@/lib/ai/providers";
 
 const suggestionSchema = z.object({
   cpcCodes: z.array(
@@ -49,13 +55,41 @@ const suggestionSchema = z.object({
 
 export async function POST(req: Request) {
   try {
-  const { model, inventionDescription, jurisdiction } = await req.json();
+    const { model, inventionDescription, jurisdiction } = await req.json();
 
-  const aiModel = getModel(model as ModelId);
+    if (!inventionDescription) {
+      return Response.json(
+        { error: "Invention description is required." },
+        { status: 400 }
+      );
+    }
 
-  const result = await generateObject({
-    model: aiModel,
-    system: `You are a senior patent strategist with expertise in patent portfolio management, CPC classification, and prosecution strategy.
+    const modelId = (model || "gemini-3.1-pro") as ModelId;
+    if (!(modelId in MODEL_PROVIDER_MAP)) {
+      return Response.json(
+        { error: `Invalid model "${model}".` },
+        { status: 400 }
+      );
+    }
+
+    if (isOpenAIModel(modelId) && !process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "OpenAI API key is not configured." },
+        { status: 400 }
+      );
+    }
+    if (isGoogleModel(modelId) && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      return Response.json(
+        { error: "Google AI API key is not configured." },
+        { status: 400 }
+      );
+    }
+
+    const aiModel = getModel(modelId);
+
+    const result = await generateObject({
+      model: aiModel,
+      system: `You are a senior patent strategist with expertise in patent portfolio management, CPC classification, and prosecution strategy.
 
 Given an invention description, provide comprehensive filing suggestions:
 
@@ -74,11 +108,11 @@ Given an invention description, provide comprehensive filing suggestions:
 ${jurisdiction ? `Target jurisdiction: ${jurisdiction}. Tailor suggestions accordingly.` : "Provide suggestions suitable for US utility patent filing."}
 
 Be specific and actionable. Base CPC suggestions on the current classification scheme.`,
-    prompt: `Invention Description:\n${inventionDescription}`,
-    schema: suggestionSchema,
-  });
+      prompt: `Invention Description:\n${inventionDescription}`,
+      schema: suggestionSchema,
+    });
 
-  return Response.json(result.object);
+    return Response.json(result.object);
   } catch (error) {
     console.error("Suggestion error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";

@@ -83,21 +83,21 @@ const IMAGE_MODEL_IDS = Object.keys(imageModelInfo) as ImageModelId[];
 const PRESETS: Record<string, { drafting: ModelId; claims: ModelId; analysis: ModelId; image: ImageModelId }> = {
   economy: {
     drafting: "gemini-2.5-flash",
-    claims: "gpt-5-mini",
+    claims: "gemini-2.5-flash",
     analysis: "gemini-2.5-flash",
-    image: "gemini-2.5-flash-image",
+    image: "nano-banana-2",
   },
   balanced: {
-    drafting: "gpt-5-mini",
-    claims: "o3",
-    analysis: "gemini-2.5-pro",
-    image: "gemini-3-pro-image",
+    drafting: "gemini-3.1-pro",
+    claims: "gemini-3.1-pro",
+    analysis: "gemini-3.1-pro",
+    image: "nano-banana-2",
   },
   premium: {
-    drafting: "gpt-5.2",
-    claims: "gpt-5.2-pro",
-    analysis: "gpt-5.2",
-    image: "gpt-image-1",
+    drafting: "gpt-4o",
+    claims: "gemini-3.1-pro",
+    analysis: "gemini-3.1-pro",
+    image: "imagen-4",
   },
 };
 
@@ -117,10 +117,10 @@ export function ConfigClient({ patent }: { patent: Patent }) {
     analysisModel: string;
     imageModel: string;
   }) ?? {
-    draftingModel: "gemini-2.5-flash",
-    claimsModel: "gpt-5.2",
-    analysisModel: "gemini-2.5-pro",
-    imageModel: "gemini-3-pro-image",
+    draftingModel: "gemini-3.1-pro",
+    claimsModel: "gemini-3.1-pro",
+    analysisModel: "gemini-3.1-pro",
+    imageModel: "nano-banana-2",
   };
 
   const form = useForm<ConfigFormValues>({

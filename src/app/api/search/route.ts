@@ -280,6 +280,66 @@ function extractXmlBlocksByTag(xml: string, tag: string): string[] {
   return results;
 }
 
+async function fetchEpoBiblio(
+  token: string,
+  docId: string
+): Promise<{ title: string; abstract: string; assignee: string; filingDate: string }> {
+  try {
+    const cleanId = docId.replace(/\./g, "");
+    const url = `https://ops.epo.org/3.2/rest-services/published-data/publication/epodoc/${cleanId}/biblio`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/xml",
+      },
+      signal: AbortSignal.timeout(8_000),
+    });
+
+    if (!res.ok) return { title: "", abstract: "", assignee: "", filingDate: "" };
+
+    const xml = await res.text();
+
+    let title = "";
+    const titleEnMatch = xml.match(
+      /<invention-title[^>]*lang="en"[^>]*>([\s\S]*?)<\/invention-title>/i
+    );
+    if (titleEnMatch) {
+      title = titleEnMatch[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      title = extractTextFromXmlTag(xml, "invention-title");
+    }
+
+    let abstract = "";
+    const absEnMatch = xml.match(
+      /<abstract[^>]*lang="en"[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i
+    );
+    if (absEnMatch) {
+      abstract = absEnMatch[1].replace(/<[^>]+>/g, "").trim();
+    } else {
+      const absAny = xml.match(
+        /<abstract[^>]*>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i
+      );
+      if (absAny) abstract = absAny[1].replace(/<[^>]+>/g, "").trim();
+    }
+
+    let assignee = "";
+    const applicantMatch = xml.match(
+      /<applicant[^>]*>[\s\S]*?<name[^>]*>([\s\S]*?)<\/name>/i
+    );
+    if (applicantMatch) assignee = applicantMatch[1].trim();
+
+    let filingDate = "";
+    const dateMatch = xml.match(
+      /<date-of-filing[^>]*>[\s\S]*?<date>([\s\S]*?)<\/date>/i
+    );
+    if (dateMatch) filingDate = dateMatch[1].trim();
+
+    return { title, abstract, assignee, filingDate };
+  } catch {
+    return { title: "", abstract: "", assignee: "", filingDate: "" };
+  }
+}
+
 async function searchEpo(query: string): Promise<SearchResult[]> {
   const token = await getEpoToken();
   const encoded = encodeURIComponent(query);
@@ -303,8 +363,9 @@ async function searchEpo(query: string): Promise<SearchResult[]> {
   const xml = await res.text();
 
   const docIds = extractXmlBlocksByTag(xml, "document-id");
-  const results: SearchResult[] = [];
+  const rawResults: { patentNumber: string; id: string; externalUrl: string }[] = [];
 
+  const seen = new Set<string>();
   for (const docBlock of docIds.slice(0, 25)) {
     const country = extractTextFromXmlTag(docBlock, "country");
     const docNumber = extractTextFromXmlTag(docBlock, "doc-number");
@@ -312,25 +373,41 @@ async function searchEpo(query: string): Promise<SearchResult[]> {
     if (!docNumber) continue;
 
     const patentNumber = `${country}${docNumber}${kind ? `.${kind}` : ""}`;
+    if (seen.has(patentNumber)) continue;
+    seen.add(patentNumber);
 
-    results.push({
-      id: `epo-${patentNumber}`,
+    rawResults.push({
       patentNumber,
-      title: "",
-      abstract: "",
-      assignee: "",
-      filingDate: "",
-      sourceApi: "epo",
+      id: `epo-${patentNumber}`,
       externalUrl: `https://worldwide.espacenet.com/patent/search?q=pn%3D${encodeURIComponent(patentNumber)}`,
     });
   }
 
-  const seen = new Set<string>();
-  return results.filter((r) => {
-    if (seen.has(r.patentNumber)) return false;
-    seen.add(r.patentNumber);
-    return true;
-  });
+  const BATCH_SIZE = 5;
+  const results: SearchResult[] = [];
+  for (let i = 0; i < rawResults.length; i += BATCH_SIZE) {
+    const batch = rawResults.slice(i, i + BATCH_SIZE);
+    const biblioResults = await Promise.all(
+      batch.map((r) => fetchEpoBiblio(token, r.patentNumber))
+    );
+
+    for (let j = 0; j < batch.length; j++) {
+      const raw = batch[j];
+      const biblio = biblioResults[j];
+      results.push({
+        id: raw.id,
+        patentNumber: raw.patentNumber,
+        title: biblio.title || "Untitled",
+        abstract: biblio.abstract || "",
+        assignee: biblio.assignee || "",
+        filingDate: biblio.filingDate || "",
+        sourceApi: "epo",
+        externalUrl: raw.externalUrl,
+      });
+    }
+  }
+
+  return results;
 }
 
 // ─── Deduplication ──────────────────────────────────────────

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   CommandDialog,
   CommandEmpty,
@@ -18,15 +18,20 @@ import {
   LayoutTemplate,
   Settings,
   Plus,
-  PenLine,
   Scale,
   Cpu,
-  Download,
+  Moon,
+  Sun,
 } from "lucide-react";
+import { useTheme } from "next-themes";
+import { useAppStore } from "@/lib/store";
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
+  const { setTheme, theme } = useTheme();
+  const setPriorArtSidebarOpen = useAppStore((s) => s.setPriorArtSidebarOpen);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -46,6 +51,10 @@ export function CommandPalette() {
     },
     [router]
   );
+
+  const patentMatch = pathname.match(/\/patents\/([^/]+)/);
+  const currentPatentId = patentMatch ? patentMatch[1] : null;
+  const isUuid = currentPatentId && /^[0-9a-f]{8}-/.test(currentPatentId);
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
@@ -83,18 +92,60 @@ export function CommandPalette() {
             <Plus className="mr-2 h-4 w-4" />
             Create New Patent
           </CommandItem>
-        </CommandGroup>
-
-        <CommandSeparator />
-
-        <CommandGroup heading="Tools">
-          <CommandItem onSelect={() => navigate("/search")}>
+          <CommandItem
+            onSelect={() => {
+              setOpen(false);
+              if (isUuid) {
+                setPriorArtSidebarOpen(true);
+              } else {
+                router.push("/search");
+              }
+            }}
+          >
             <Scale className="mr-2 h-4 w-4" />
             Prior Art Search
           </CommandItem>
           <CommandItem onSelect={() => navigate("/settings")}>
             <Cpu className="mr-2 h-4 w-4" />
             AI Model Configuration
+          </CommandItem>
+        </CommandGroup>
+
+        {isUuid && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Current Patent">
+              <CommandItem onSelect={() => navigate(`/patents/${currentPatentId}/editor`)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Open Editor
+              </CommandItem>
+              <CommandItem onSelect={() => navigate(`/patents/${currentPatentId}/claims`)}>
+                <Scale className="mr-2 h-4 w-4" />
+                Open Claims
+              </CommandItem>
+              <CommandItem onSelect={() => navigate(`/patents/${currentPatentId}/prior-art`)}>
+                <Search className="mr-2 h-4 w-4" />
+                Open Prior Art
+              </CommandItem>
+            </CommandGroup>
+          </>
+        )}
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Theme">
+          <CommandItem
+            onSelect={() => {
+              setTheme(theme === "dark" ? "light" : "dark");
+              setOpen(false);
+            }}
+          >
+            {theme === "dark" ? (
+              <Sun className="mr-2 h-4 w-4" />
+            ) : (
+              <Moon className="mr-2 h-4 w-4" />
+            )}
+            Toggle Theme
           </CommandItem>
         </CommandGroup>
       </CommandList>

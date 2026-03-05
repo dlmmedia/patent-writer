@@ -72,9 +72,9 @@ const MODEL_PRESETS = {
     description: "Cost-effective, ideal for drafts and iteration",
     config: {
       draftingModel: "gemini-2.5-flash" as ModelId,
-      claimsModel: "gpt-5-mini" as ModelId,
+      claimsModel: "gemini-2.5-flash" as ModelId,
       analysisModel: "gemini-2.5-flash" as ModelId,
-      imageModel: "gemini-2.5-flash-image" as ImageModelId,
+      imageModel: "nano-banana-2" as ImageModelId,
     },
   },
   balanced: {
@@ -82,10 +82,10 @@ const MODEL_PRESETS = {
     icon: Scale,
     description: "Best quality-to-cost ratio for most applications",
     config: {
-      draftingModel: "gpt-5.2" as ModelId,
-      claimsModel: "gpt-5.2" as ModelId,
-      analysisModel: "gemini-2.5-pro" as ModelId,
-      imageModel: "gemini-3-pro-image" as ImageModelId,
+      draftingModel: "gemini-3.1-pro" as ModelId,
+      claimsModel: "gemini-3.1-pro" as ModelId,
+      analysisModel: "gemini-3.1-pro" as ModelId,
+      imageModel: "nano-banana-2" as ImageModelId,
     },
   },
   premium: {
@@ -93,10 +93,10 @@ const MODEL_PRESETS = {
     icon: Crown,
     description: "Highest quality for mission-critical filings",
     config: {
-      draftingModel: "gpt-5.2" as ModelId,
-      claimsModel: "gpt-5.2-pro" as ModelId,
-      analysisModel: "gemini-2.5-pro" as ModelId,
-      imageModel: "gpt-image-1" as ImageModelId,
+      draftingModel: "gpt-4o" as ModelId,
+      claimsModel: "gemini-3.1-pro" as ModelId,
+      analysisModel: "gemini-3.1-pro" as ModelId,
+      imageModel: "imagen-4" as ImageModelId,
     },
   },
 } as const;
@@ -130,8 +130,10 @@ export default function NewPatentPage() {
   const [step, setStep] = useState(0);
   const [isPending, startTransition] = useTransition();
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState<keyof typeof MODEL_PRESETS>("balanced");
+  const [selectedPreset, setSelectedPreset] = useState<keyof typeof MODEL_PRESETS | null>("balanced");
   const [selectedCpcCodes, setSelectedCpcCodes] = useState<string[]>([]);
+  const [aiSuggestions, setAiSuggestions] = useState<{code: string; description: string; confidence: number}[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -196,6 +198,30 @@ export default function NewPatentPage() {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
+  async function fetchCpcSuggestions() {
+    const description = values.inventionDescription;
+    if (!description || description.trim().length < 10) return;
+
+    setLoadingSuggestions(true);
+    try {
+      const res = await fetch("/api/ai/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inventionDescription: description }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.suggestions) && data.suggestions.length > 0) {
+          setAiSuggestions(data.suggestions);
+        }
+      }
+    } catch {
+      // AI suggestions unavailable — fallback CPC codes remain visible
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }
+
   function handleCreate() {
     startTransition(async () => {
       const patent = await createPatent({
@@ -205,6 +231,7 @@ export default function NewPatentPage() {
         inventionDescription: values.inventionDescription || undefined,
         technologyArea: values.technologyArea || undefined,
         entitySize: values.entitySize || undefined,
+        cpcCodes: selectedCpcCodes.length > 0 ? selectedCpcCodes : undefined,
         aiModelConfig: {
           draftingModel: values.draftingModel,
           claimsModel: values.claimsModel,
@@ -212,9 +239,30 @@ export default function NewPatentPage() {
           imageModel: values.imageModel,
         },
       });
+
+      if (uploadedFiles.length > 0) {
+        for (const file of uploadedFiles) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            formData.append("patentId", patent.id);
+            await fetch("/api/patents/documents", {
+              method: "POST",
+              body: formData,
+            });
+          } catch {
+            // Non-critical: documents can be re-uploaded from the editor
+          }
+        }
+      }
+
       router.push(`/patents/${patent.id}`);
     });
   }
+
+  const displayedCpcCodes = aiSuggestions.length > 0
+    ? aiSuggestions.map((s) => ({ code: s.code, label: s.description }))
+    : SUGGESTED_CPC_CODES;
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
@@ -477,15 +525,38 @@ export default function NewPatentPage() {
                 <Label className="text-sm font-medium">Suggested CPC Codes</Label>
                 <Badge variant="outline" className="gap-1 text-xs">
                   <Sparkles className="h-3 w-3" />
-                  AI Suggested
+                  {aiSuggestions.length > 0 ? "AI Suggested" : "Default"}
                 </Badge>
               </div>
               <p className="text-xs text-muted-foreground">
                 Select the CPC classification codes most relevant to your invention. These help
                 categorize your patent for prior art searches.
               </p>
+
+              {values.inventionDescription && values.inventionDescription.trim().length >= 10 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={fetchCpcSuggestions}
+                  disabled={loadingSuggestions}
+                >
+                  {loadingSuggestions ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Analyzing...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Get AI Suggestions
+                    </>
+                  )}
+                </Button>
+              )}
+
               <div className="grid gap-2">
-                {SUGGESTED_CPC_CODES.map((cpc) => (
+                {displayedCpcCodes.map((cpc) => (
                   <label
                     key={cpc.code}
                     className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors hover:bg-accent/50 ${
@@ -588,7 +659,7 @@ export default function NewPatentPage() {
                     value={values.draftingModel}
                     onValueChange={(v) => {
                       setValue("draftingModel", v);
-                      setSelectedPreset(undefined as unknown as keyof typeof MODEL_PRESETS);
+                      setSelectedPreset(null);
                     }}
                   >
                     <SelectTrigger className="w-full">
@@ -616,7 +687,7 @@ export default function NewPatentPage() {
                     value={values.claimsModel}
                     onValueChange={(v) => {
                       setValue("claimsModel", v);
-                      setSelectedPreset(undefined as unknown as keyof typeof MODEL_PRESETS);
+                      setSelectedPreset(null);
                     }}
                   >
                     <SelectTrigger className="w-full">
@@ -644,7 +715,7 @@ export default function NewPatentPage() {
                     value={values.analysisModel}
                     onValueChange={(v) => {
                       setValue("analysisModel", v);
-                      setSelectedPreset(undefined as unknown as keyof typeof MODEL_PRESETS);
+                      setSelectedPreset(null);
                     }}
                   >
                     <SelectTrigger className="w-full">
@@ -672,7 +743,7 @@ export default function NewPatentPage() {
                     value={values.imageModel}
                     onValueChange={(v) => {
                       setValue("imageModel", v);
-                      setSelectedPreset(undefined as unknown as keyof typeof MODEL_PRESETS);
+                      setSelectedPreset(null);
                     }}
                   >
                     <SelectTrigger className="w-full">

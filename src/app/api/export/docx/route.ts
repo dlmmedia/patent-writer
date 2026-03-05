@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generatePatentDocx } from "@/lib/export/docx-generator";
+import {
+  generatePatentDocx,
+  type DocxExportOptions,
+} from "@/lib/export/docx-generator";
 import { getPatent } from "@/lib/actions/patents";
 
 export async function GET(request: NextRequest) {
@@ -22,16 +25,73 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const buffer = await generatePatentDocx(patent);
+  const pageSizeParam = searchParams.get("pageSize");
+  const fontSizeParam = searchParams.get("fontSize");
+  const paragraphNumbering = searchParams.get("paragraphNumbering");
+  const headersFooters = searchParams.get("headersFooters");
 
-  const filename = `${patent.title.replace(/[^a-zA-Z0-9]/g, "_")}_Patent_Application.docx`;
+  const options: Partial<DocxExportOptions> = {};
 
-  return new NextResponse(new Uint8Array(buffer), {
-    status: 200,
-    headers: {
-      "Content-Type":
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-    },
-  });
+  if (pageSizeParam === "a4") {
+    options.pageSize = "A4";
+  } else {
+    options.pageSize = "LETTER";
+  }
+
+  if (fontSizeParam) {
+    const size = parseInt(fontSizeParam, 10);
+    if (size >= 8 && size <= 16) {
+      options.fontSize = size;
+    }
+  }
+
+  if (paragraphNumbering === "false") {
+    options.includeParagraphNumbers = false;
+  }
+
+  if (headersFooters === "false") {
+    options.includeHeadersFooters = false;
+  }
+
+  try {
+    const buffer = await generatePatentDocx(patent, options);
+    const filename = `${patent.title.replace(/[^a-zA-Z0-9]/g, "_")}_Patent_Application.docx`;
+
+    return new NextResponse(new Uint8Array(buffer), {
+      status: 200,
+      headers: {
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+      },
+    });
+  } catch (renderError) {
+    console.error("DOCX render error:", renderError);
+
+    try {
+      const fallbackPatent = { ...patent, drawings: [] };
+      const buffer = await generatePatentDocx(fallbackPatent, options);
+      const filename = `${patent.title.replace(/[^a-zA-Z0-9]/g, "_")}_Patent_Application.docx`;
+
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "Content-Disposition": `attachment; filename="${filename}"`,
+          "X-Drawings-Omitted": "true",
+        },
+      });
+    } catch (fallbackError) {
+      console.error("DOCX fallback render error:", fallbackError);
+      const message =
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : "Unknown error";
+      return NextResponse.json(
+        { error: `Failed to render DOCX: ${message}` },
+        { status: 500 }
+      );
+    }
+  }
 }

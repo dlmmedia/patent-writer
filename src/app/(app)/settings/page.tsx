@@ -59,6 +59,8 @@ export default function SettingsPage() {
     setDefaultClaimsModel,
     setDefaultAnalysisModel,
     setDefaultImageModel,
+    exportSettings,
+    setExportSettings,
   } = useAppStore();
 
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({});
@@ -253,7 +255,12 @@ export default function SettingsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Page Size</Label>
-              <Select defaultValue="letter">
+              <Select
+                value={exportSettings.pageSize}
+                onValueChange={(v) =>
+                  setExportSettings({ pageSize: v as "letter" | "a4" })
+                }
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -266,33 +273,52 @@ export default function SettingsPage() {
 
             <div className="space-y-2">
               <Label>Paragraph Numbering</Label>
-              <Select defaultValue="bracket">
+              <Select
+                value={exportSettings.paragraphNumbering ? "on" : "off"}
+                onValueChange={(v) =>
+                  setExportSettings({ paragraphNumbering: v === "on" })
+                }
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="bracket">[0001] Bracket Style</SelectItem>
-                  <SelectItem value="period">1. Period Style</SelectItem>
-                  <SelectItem value="none">No Numbering</SelectItem>
+                  <SelectItem value="on">[0001] Bracket Style</SelectItem>
+                  <SelectItem value="off">No Numbering</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
               <Label>Font Size (pt)</Label>
-              <Input type="number" defaultValue={12} min={8} max={16} />
+              <Input
+                type="number"
+                value={exportSettings.fontSize}
+                min={8}
+                max={16}
+                onChange={(e) =>
+                  setExportSettings({
+                    fontSize: Math.min(16, Math.max(8, Number(e.target.value) || 12)),
+                  })
+                }
+              />
             </div>
 
             <div className="space-y-2">
               <Label>Line Spacing</Label>
-              <Select defaultValue="double">
+              <Select
+                value={String(exportSettings.lineSpacing)}
+                onValueChange={(v) =>
+                  setExportSettings({ lineSpacing: Number(v) })
+                }
+              >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="single">Single</SelectItem>
+                  <SelectItem value="1">Single</SelectItem>
                   <SelectItem value="1.5">1.5</SelectItem>
-                  <SelectItem value="double">Double</SelectItem>
+                  <SelectItem value="2">Double</SelectItem>
                 </SelectContent>
               </Select>
             </div>
