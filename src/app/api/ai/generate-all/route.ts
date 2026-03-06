@@ -11,11 +11,12 @@ import {
   isOpenAIModel,
   isOpenAIImageModel,
 } from "@/lib/ai/providers";
-import { getSystemPrompt, getFigureAnalysisPrompt, getBriefDescriptionWithFiguresPrompt } from "@/lib/ai/prompts";
+import { getSystemPrompt, getFigureAnalysisPrompt, getBriefDescriptionWithFiguresPrompt, buildEnhancedContext } from "@/lib/ai/prompts";
 import { db } from "@/lib/db";
-import { patents, patentSections, patentClaims, patentDocuments, patentDrawings, referenceNumerals } from "@/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { patents, patentSections, patentClaims, patentDocuments, patentDrawings, referenceNumerals, priorArtResults } from "@/lib/db/schema";
+import { eq, asc, desc } from "drizzle-orm";
 import { figureAnalysisSchema } from "@/app/api/ai/figures/analyze/route";
+import type { KeyFeature, IntakeQA } from "@/lib/db/schema";
 
 const GENERATION_ORDER = [
   "title",
@@ -56,41 +57,40 @@ const claimSchema = z.object({
 
 function buildSectionContext(
   generatedSections: Record<string, string>,
-  inventionDescription: string,
-  title: string,
-  jurisdiction: string,
-  referenceText?: string
+  patent: {
+    title: string;
+    inventionDescription: string | null;
+    inventionProblem?: string | null;
+    inventionSolution?: string | null;
+    technologyArea?: string | null;
+    keyFeatures?: KeyFeature[] | null;
+    knownPriorArt?: string | null;
+    intakeResponses?: IntakeQA[] | null;
+    jurisdiction: string;
+    type: string;
+  },
+  referenceText?: string,
+  priorArt?: { title: string; abstract?: string | null; relevanceScore?: number | null }[]
 ): string {
-  const parts = [`Patent title: ${title}`];
-  if (inventionDescription) {
-    parts.push(`Invention description: ${inventionDescription}`);
-  }
-  parts.push(`Jurisdiction: ${jurisdiction}`);
-
-  if (referenceText && referenceText.trim().length > 0) {
-    const truncated =
-      referenceText.length > 30000
-        ? referenceText.slice(0, 30000) + "\n[...truncated...]"
-        : referenceText;
-    parts.push(
-      `\nREFERENCE DOCUMENTS (use these as technical context for drafting):\n${truncated}`
-    );
-  }
-
-  const existingContent = Object.entries(generatedSections)
-    .filter(([, content]) => content.trim().length > 0)
-    .map(([section, content]) => `--- ${section.replace(/_/g, " ").toUpperCase()} ---\n${content}`)
-    .join("\n\n");
-
-  if (existingContent) {
-    parts.push(`\nAlready written sections:\n${existingContent}`);
-  }
-
-  parts.push(
-    "\nGenerate content that is consistent with the sections above and reference documents. Do not repeat content already covered."
-  );
-
-  return parts.join("\n");
+  return buildEnhancedContext({
+    title: patent.title,
+    inventionDescription: patent.inventionDescription || undefined,
+    inventionProblem: patent.inventionProblem || undefined,
+    inventionSolution: patent.inventionSolution || undefined,
+    technologyArea: patent.technologyArea || undefined,
+    keyFeatures: (patent.keyFeatures as KeyFeature[]) || undefined,
+    knownPriorArt: patent.knownPriorArt || undefined,
+    intakeResponses: (patent.intakeResponses as IntakeQA[]) || undefined,
+    priorArtResults: priorArt?.map((pa) => ({
+      title: pa.title,
+      abstract: pa.abstract || undefined,
+      relevanceScore: pa.relevanceScore || undefined,
+    })),
+    jurisdiction: patent.jurisdiction,
+    patentType: patent.type,
+    generatedSections,
+    referenceText,
+  });
 }
 
 export async function POST(req: Request) {
@@ -139,6 +139,13 @@ export async function POST(req: Request) {
       .filter((d) => d.extractedText && d.extractedText.trim().length > 0)
       .map((d) => `--- REFERENCE: ${d.fileName} ---\n${d.extractedText}`)
       .join("\n\n");
+
+    // Fetch saved prior art results for context
+    const savedPriorArt = await db.query.priorArtResults.findMany({
+      where: eq(priorArtResults.patentId, patentId),
+      orderBy: [desc(priorArtResults.relevanceScore)],
+      limit: 15,
+    });
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -204,10 +211,9 @@ export async function POST(req: Request) {
 
               const context = buildSectionContext(
                 generatedSections,
-                patent.inventionDescription || "",
-                patent.title,
-                patent.jurisdiction,
-                referenceText
+                patent,
+                referenceText,
+                savedPriorArt
               );
 
               const claimsResult = await generateObject({
@@ -288,15 +294,15 @@ export async function POST(req: Request) {
 
             const context = buildSectionContext(
               generatedSections,
-              patent.inventionDescription || "",
-              patent.title,
-              patent.jurisdiction,
-              referenceText
+              patent,
+              referenceText,
+              savedPriorArt
             );
 
             const systemPrompt = getSystemPrompt(
               sectionType,
-              patent.jurisdiction
+              patent.jurisdiction,
+              patent.type
             );
 
             const result = streamText({
@@ -480,10 +486,9 @@ export async function POST(req: Request) {
                   const briefPrompt = getBriefDescriptionWithFiguresPrompt(figures);
                   const briefContext = buildSectionContext(
                     generatedSections,
-                    patent.inventionDescription || "",
-                    patent.title,
-                    patent.jurisdiction,
-                    referenceText
+                    patent,
+                    referenceText,
+                    savedPriorArt
                   );
 
                   const briefResult = streamText({

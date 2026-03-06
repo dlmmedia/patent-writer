@@ -19,6 +19,8 @@ import {
 } from "docx";
 import type { PatentWithRelations, SectionType } from "@/lib/types";
 import { SECTION_LABELS } from "@/lib/types";
+import { getINIDFields, getDocumentStats, buildCrossReferenceText, buildGovernmentRightsStatement } from "@/lib/patent/inid-codes";
+import type { RelatedApplication, GovernmentContract } from "@/lib/db/schema";
 
 export interface DocxExportOptions {
   pageSize: "LETTER" | "A4";
@@ -282,11 +284,18 @@ export async function generatePatentDocx(
     | { name: string; address?: string }[]
     | null;
 
-  // ── Title Page ──────────────────────────────────────────────────────────────
+  // ── INID-Coded Front Page ────────────────────────────────────────────────────
 
   const titleChildren: Paragraph[] = [];
+  const inidFields = getINIDFields(patent as PatentWithRelations);
+  const docStats = getDocumentStats(patent as PatentWithRelations);
+  const isProvisional = patent.type === "provisional";
 
-  titleChildren.push(new Paragraph({ spacing: { before: 2400 } }));
+  titleChildren.push(new Paragraph({ spacing: { before: 800 } }));
+
+  // Header: Issuing authority and document type
+  const authorityField = inidFields.find((f) => f.code === "(19)");
+  const docTypeField = inidFields.find((f) => f.code === "(12)");
 
   titleChildren.push(
     new Paragraph({
@@ -294,7 +303,7 @@ export async function generatePatentDocx(
       spacing: { after: 40 },
       children: [
         new TextRun({
-          text: "UNITED STATES",
+          text: (authorityField?.value as string) || "United States",
           font: FONT,
           size: hp - 2,
           color: "555555",
@@ -309,7 +318,7 @@ export async function generatePatentDocx(
       spacing: { after: 200 },
       children: [
         new TextRun({
-          text: "PATENT APPLICATION PUBLICATION",
+          text: ((docTypeField?.value as string) || "PATENT APPLICATION PUBLICATION").toUpperCase(),
           bold: true,
           font: FONT,
           size: hp + 4,
@@ -321,73 +330,78 @@ export async function generatePatentDocx(
 
   titleChildren.push(rule(true));
 
+  // INID coded bibliographic data
+  for (const field of inidFields) {
+    if (field.code === "(19)" || field.code === "(12)" || field.code === "(57)") continue;
+
+    const values = Array.isArray(field.value)
+      ? (field.value as string[])
+      : [field.value as string];
+
+    if (!values[0]) continue;
+
+    for (let vi = 0; vi < values.length; vi++) {
+      titleChildren.push(
+        new Paragraph({
+          spacing: { after: 60 },
+          children: [
+            new TextRun({
+              text: vi === 0 ? `${field.code} ` : "     ",
+              bold: true,
+              font: FONT,
+              size: hp - 2,
+              color: "555555",
+            }),
+            new TextRun({
+              text: vi === 0 ? `${field.label}: ` : "",
+              bold: true,
+              font: FONT,
+              size: hp - 2,
+              color: "333333",
+            }),
+            new TextRun({
+              text: values[vi],
+              font: FONT,
+              size: hp - 2,
+              color: "333333",
+            }),
+          ],
+        })
+      );
+    }
+  }
+
+  titleChildren.push(rule(false));
+
+  // Document statistics
+  const statsLine = [
+    `${docStats.claimCount} Claims`,
+    `${docStats.drawingSheetCount} Drawing Sheets`,
+  ].join("  |  ");
+
   titleChildren.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
+      spacing: { after: 100 },
       children: [
         new TextRun({
-          text: patent.title.toUpperCase(),
-          bold: true,
+          text: statsLine,
           font: FONT,
-          size: hp + 8,
+          size: hp - 4,
+          color: "666666",
+          italics: true,
         }),
       ],
     })
   );
 
-  titleChildren.push(rule(true));
-
-  const metaRows: { label: string; value: string }[] = [];
-  if (inventors && inventors.length > 0) {
-    metaRows.push({
-      label: inventors.length === 1 ? "Inventor:" : "Inventors:",
-      value: inventors
-        .map((i) => i.name + (i.address ? `, ${i.address}` : ""))
-        .join("; "),
-    });
-  }
-  if (patent.assignee)
-    metaRows.push({ label: "Assignee:", value: patent.assignee });
-  if (patent.filingDate)
-    metaRows.push({ label: "Filed:", value: fmtDate(patent.filingDate) });
-  if (patent.priorityDate)
-    metaRows.push({ label: "Priority:", value: fmtDate(patent.priorityDate) });
-  if (patent.technologyArea)
-    metaRows.push({ label: "Field:", value: patent.technologyArea });
-
-  for (const row of metaRows) {
-    titleChildren.push(
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        spacing: { after: 80 },
-        children: [
-          new TextRun({
-            text: `${row.label} `,
-            bold: true,
-            font: FONT,
-            size: hp - 2,
-            color: "333333",
-          }),
-          new TextRun({
-            text: row.value,
-            font: FONT,
-            size: hp - 2,
-            color: "333333",
-          }),
-        ],
-      })
-    );
-  }
-
-  titleChildren.push(rule(false));
-
+  // Docket number
   titleChildren.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
       children: [
         new TextRun({
-          text: "Docket No.: _______________",
+          text: `Docket No.: ${patent.docketNumber || "_______________"}`,
           font: FONT,
           size: hp - 4,
           color: "888888",
@@ -396,16 +410,80 @@ export async function generatePatentDocx(
     })
   );
 
+  // Abstract on front page (INID (57))
+  const abstractField = inidFields.find((f) => f.code === "(57)");
+  if (abstractField?.value) {
+    titleChildren.push(rule(false));
+    titleChildren.push(
+      new Paragraph({
+        spacing: { before: 200, after: 100 },
+        children: [
+          new TextRun({
+            text: "(57) ABSTRACT",
+            bold: true,
+            font: FONT,
+            size: hp - 2,
+            color: "333333",
+          }),
+        ],
+      })
+    );
+    const abstractText = (abstractField.value as string).split(/\s+/).slice(0, 150).join(" ");
+    titleChildren.push(
+      new Paragraph({
+        spacing: { after: 200, line: 300 },
+        alignment: AlignmentType.JUSTIFIED,
+        children: [
+          new TextRun({
+            text: abstractText,
+            font: FONT,
+            size: hp - 2,
+          }),
+        ],
+      })
+    );
+  }
+
   // ── Specification Body ──────────────────────────────────────────────────────
 
   const bodyChildren: (Paragraph | Table)[] = [];
   let paraCounter = 1;
 
+  // Provisional header if applicable
+  if (isProvisional) {
+    bodyChildren.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 400 },
+        children: [
+          new TextRun({
+            text: "PROVISIONAL APPLICATION FOR PATENT",
+            bold: true,
+            font: FONT,
+            size: hp + 2,
+            color: "333333",
+          }),
+        ],
+      })
+    );
+  }
+
   bodyChildren.push(sectionHeading("Title of the Invention", hp));
   bodyChildren.push(bodyParagraph(patent.title, hp));
 
+  // Auto-populate Cross-Reference from relatedApplications data
+  const relatedApps = (patent.relatedApplications as RelatedApplication[] | null) || [];
+  const existingCrossRef = getSectionContent(patent, "cross_reference");
+  const autoCrossRef = buildCrossReferenceText(relatedApps);
+
   for (const type of SPEC_SECTIONS) {
-    const content = getSectionContent(patent, type);
+    let content = getSectionContent(patent, type);
+
+    // Use auto-generated cross-reference if section is empty but we have related apps
+    if (type === "cross_reference" && !content && autoCrossRef) {
+      content = autoCrossRef;
+    }
+
     if (!content) continue;
 
     bodyChildren.push(sectionHeading(SECTION_LABELS[type], hp));
@@ -417,6 +495,18 @@ export async function generatePatentDocx(
           : bodyParagraph(p, hp)
       );
     }
+  }
+
+  // Government rights statement
+  const govContract = patent.governmentContract as GovernmentContract | null;
+  const govStatement = buildGovernmentRightsStatement(govContract);
+  if (govStatement) {
+    bodyChildren.push(sectionHeading("Government Rights", hp));
+    bodyChildren.push(
+      opts.includeParagraphNumbers
+        ? numberedParagraph(paraCounter++, govStatement, hp)
+        : bodyParagraph(govStatement, hp)
+    );
   }
 
   // ── Claims ──────────────────────────────────────────────────────────────────

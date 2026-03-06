@@ -59,6 +59,27 @@ export async function createPatent(data: {
     analysisModel: string;
     imageModel: string;
   };
+  inventors?: { givenName: string; familyName: string; city?: string; state?: string; country?: string; email?: string; name?: string; address?: string }[];
+  assignee?: string;
+  docketNumber?: string;
+  correspondenceAddress?: {
+    name?: string; address?: string; city?: string; state?: string;
+    zip?: string; country?: string; phone?: string; email?: string; customerNumber?: string;
+  };
+  governmentContract?: {
+    isMadeByAgency?: boolean; isUnderContract?: boolean;
+    agencyName?: string; contractNumber?: string;
+  };
+  relatedApplications?: {
+    type: "provisional" | "continuation" | "divisional" | "cip";
+    applicationNumber?: string; filingDate?: string; title?: string;
+  }[];
+  inventionProblem?: string;
+  inventionSolution?: string;
+  keyFeatures?: { feature: string; description?: string; isNovel?: boolean }[];
+  knownPriorArt?: string;
+  intakeCompleted?: boolean;
+  intakeResponses?: { question: string; answer: string; round: number }[];
 }) {
   const [patent] = await db.insert(patents).values(data).returning();
 

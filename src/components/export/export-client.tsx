@@ -101,6 +101,8 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
+  const [downloadingCoverSheet, setDownloadingCoverSheet] = useState(false);
+  const [downloadingFilingPackage, setDownloadingFilingPackage] = useState(false);
   const [generatingMissing, setGeneratingMissing] = useState(false);
 
   const sectionStatuses = getSectionStatuses(patent);
@@ -564,6 +566,104 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
                 : downloadingZip
                   ? "Creating ZIP..."
                   : `Download ZIP (${patent.drawings.length} drawings)`}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Cover Sheet & Filing Package */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="flex flex-col">
+          <CardHeader className="flex-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileText className="h-4 w-4 text-amber-500" />
+              PTO/SB/16 Cover Sheet
+            </CardTitle>
+            <CardDescription>
+              Official USPTO Provisional Application Cover Sheet with inventor data,
+              correspondence address, entity size, and fee calculation auto-filled.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              className="w-full"
+              variant="outline"
+              disabled={downloadingCoverSheet}
+              onClick={async () => {
+                setDownloadingCoverSheet(true);
+                try {
+                  const res = await fetch(`/api/export/cover-sheet?patentId=${patent.id}`);
+                  if (!res.ok) throw new Error("Failed");
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `PTO-SB-16_Cover_Sheet.docx`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  toast.success("Cover sheet downloaded");
+                } catch {
+                  toast.error("Failed to download cover sheet");
+                } finally {
+                  setDownloadingCoverSheet(false);
+                }
+              }}
+            >
+              {downloadingCoverSheet ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <FileDown className="h-4 w-4 mr-2" />
+              )}
+              {downloadingCoverSheet ? "Generating..." : "Download Cover Sheet"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader className="flex-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Package className="h-4 w-4 text-emerald-600" />
+              Complete Filing Package
+            </CardTitle>
+            <CardDescription>
+              ZIP containing: Specification DOCX, PTO/SB/16 Cover Sheet, IDS (if
+              prior art exists), Drawings, and Fee Worksheet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              className="w-full"
+              disabled={downloadingFilingPackage}
+              onClick={async () => {
+                setDownloadingFilingPackage(true);
+                try {
+                  const res = await fetch(`/api/export/filing-package?patentId=${patent.id}`);
+                  if (!res.ok) throw new Error("Failed");
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `Filing_Package_${patent.title.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 30)}.zip`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                  toast.success("Filing package downloaded");
+                } catch {
+                  toast.error("Failed to generate filing package");
+                } finally {
+                  setDownloadingFilingPackage(false);
+                }
+              }}
+            >
+              {downloadingFilingPackage ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Package className="h-4 w-4 mr-2" />
+              )}
+              {downloadingFilingPackage ? "Building Package..." : "Download Filing Package (ZIP)"}
             </Button>
           </CardContent>
         </Card>

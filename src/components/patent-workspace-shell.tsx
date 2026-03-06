@@ -17,7 +17,7 @@ export function PatentWorkspaceShell({
 
   return (
     <div className="flex flex-1 min-h-0">
-      <div className="flex-1 min-w-0 flex flex-col overflow-auto">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col overflow-auto">
         {children}
       </div>
 

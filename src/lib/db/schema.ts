@@ -70,6 +70,58 @@ export const entitySizeEnum = pgEnum("entity_size", [
   "large",
 ]);
 
+// ─── Shared JSONB Types ──────────────────────────────────────
+
+export type CorrespondenceAddress = {
+  name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+  phone?: string;
+  email?: string;
+  customerNumber?: string;
+};
+
+export type GovernmentContract = {
+  isMadeByAgency?: boolean;
+  isUnderContract?: boolean;
+  agencyName?: string;
+  contractNumber?: string;
+};
+
+export type RelatedApplication = {
+  type: "provisional" | "continuation" | "divisional" | "cip";
+  applicationNumber?: string;
+  filingDate?: string;
+  title?: string;
+};
+
+export type Inventor = {
+  givenName: string;
+  familyName: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  email?: string;
+  /** Legacy flat name, kept for backward compat */
+  name?: string;
+  address?: string;
+};
+
+export type KeyFeature = {
+  feature: string;
+  description?: string;
+  isNovel?: boolean;
+};
+
+export type IntakeQA = {
+  question: string;
+  answer: string;
+  round: number;
+};
+
 // ─── Patents ─────────────────────────────────────────────────
 
 export const patents = pgTable("patents", {
@@ -93,10 +145,30 @@ export const patents = pgTable("patents", {
     imageModel: "nano-banana-2",
   }),
   technologyArea: text("technology_area"),
-  inventors: jsonb("inventors").$type<{ name: string; address?: string }[]>().default([]),
+  inventors: jsonb("inventors").$type<Inventor[]>().default([]),
   assignee: text("assignee"),
   priorityDate: timestamp("priority_date"),
   filingDate: timestamp("filing_date"),
+
+  // ── New bibliographic / filing fields ─────────────────────
+  docketNumber: text("docket_number"),
+  applicationNumber: text("application_number"),
+  publicationNumber: text("publication_number"),
+  kindCode: text("kind_code"),
+  correspondenceAddress: jsonb("correspondence_address").$type<CorrespondenceAddress>(),
+  governmentContract: jsonb("government_contract").$type<GovernmentContract>(),
+  relatedApplications: jsonb("related_applications").$type<RelatedApplication[]>().default([]),
+
+  // ── Structured invention disclosure ───────────────────────
+  inventionProblem: text("invention_problem"),
+  inventionSolution: text("invention_solution"),
+  keyFeatures: jsonb("key_features").$type<KeyFeature[]>().default([]),
+  knownPriorArt: text("known_prior_art"),
+
+  // ── AI intake interview ───────────────────────────────────
+  intakeCompleted: boolean("intake_completed").default(false),
+  intakeResponses: jsonb("intake_responses").$type<IntakeQA[]>().default([]),
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

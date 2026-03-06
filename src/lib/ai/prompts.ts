@@ -254,15 +254,161 @@ EXAMPLE OUTPUT:
 Output ONLY the cross-reference text, or a template if no specific applications are provided.`,
 };
 
-export function getSystemPrompt(sectionType: string, jurisdiction: string = "US"): string {
+const provisionalOverrides: Record<string, string> = {
+  claims: `Note: This is a PROVISIONAL patent application. Formal claims are NOT required for a PPA.
+However, including optional claims may strengthen the filing. If generating claims, keep them broad
+and focus on the core inventive concept. 3-5 claims are typical for a provisional.`,
+
+  detailed_description: `Note: This is a PROVISIONAL patent application. The detailed description should be
+thorough enough to enable a person of ordinary skill (POSITA) to make and use the invention.
+While formal paragraph numbering is not required, provide comprehensive technical disclosure
+including all essential elements, how they operate together, and specific embodiments.`,
+
+  summary: `Note: This is a PROVISIONAL patent application. The summary should provide a clear
+high-level overview of the invention. While less formal than a utility application summary,
+it should cover the problem, solution, and key advantages.`,
+};
+
+export function getSystemPrompt(
+  sectionType: string,
+  jurisdiction: string = "US",
+  patentType: string = "utility"
+): string {
   const normalizedJurisdiction = jurisdiction.toUpperCase();
   const promptFn = sectionPrompts[sectionType];
 
+  let base: string;
   if (!promptFn) {
-    return `You are a senior patent attorney with deep expertise in patent drafting. Generate content for the "${sectionType.replace(/_/g, " ")}" section of a patent application. Follow standard patent conventions and use formal legal language.\n\n${jurisdictionRules[normalizedJurisdiction] || jurisdictionRules.US}`;
+    base = `You are a senior patent attorney with deep expertise in patent drafting. Generate content for the "${sectionType.replace(/_/g, " ")}" section of a patent application. Follow standard patent conventions and use formal legal language.\n\n${jurisdictionRules[normalizedJurisdiction] || jurisdictionRules.US}`;
+  } else {
+    base = promptFn(normalizedJurisdiction);
   }
 
-  return promptFn(normalizedJurisdiction);
+  if (patentType === "provisional" && provisionalOverrides[sectionType]) {
+    base += `\n\n${provisionalOverrides[sectionType]}`;
+  }
+
+  return base;
+}
+
+/**
+ * Build enhanced context from structured invention disclosure data.
+ */
+export function buildEnhancedContext(data: {
+  title: string;
+  inventionDescription?: string;
+  inventionProblem?: string;
+  inventionSolution?: string;
+  technologyArea?: string;
+  keyFeatures?: { feature: string; description?: string; isNovel?: boolean }[];
+  knownPriorArt?: string;
+  intakeResponses?: { question: string; answer: string; round: number }[];
+  priorArtResults?: { title: string; abstract?: string; relevanceScore?: number }[];
+  jurisdiction: string;
+  patentType?: string;
+  generatedSections?: Record<string, string>;
+  referenceText?: string;
+}): string {
+  const parts: string[] = [];
+
+  parts.push(`Patent title: ${data.title}`);
+  parts.push(`Jurisdiction: ${data.jurisdiction}`);
+  if (data.patentType) parts.push(`Application type: ${data.patentType}`);
+  if (data.technologyArea) parts.push(`Technology area: ${data.technologyArea}`);
+
+  if (data.inventionProblem) {
+    parts.push(`\nPROBLEM BEING SOLVED:\n${data.inventionProblem}`);
+  }
+  if (data.inventionSolution) {
+    parts.push(`\nSOLUTION / HOW IT WORKS:\n${data.inventionSolution}`);
+  }
+  if (data.inventionDescription) {
+    parts.push(`\nFULL INVENTION DESCRIPTION:\n${data.inventionDescription}`);
+  }
+
+  if (data.keyFeatures && data.keyFeatures.length > 0) {
+    parts.push("\nKEY FEATURES:");
+    for (const f of data.keyFeatures) {
+      const novel = f.isNovel ? " [NOVEL]" : "";
+      parts.push(`  - ${f.feature}${novel}${f.description ? `: ${f.description}` : ""}`);
+    }
+  }
+
+  if (data.knownPriorArt) {
+    parts.push(`\nINVENTOR-KNOWN PRIOR ART:\n${data.knownPriorArt}`);
+  }
+
+  if (data.intakeResponses && data.intakeResponses.length > 0) {
+    parts.push("\nAI INTERVIEW RESPONSES:");
+    for (const r of data.intakeResponses) {
+      parts.push(`  Q: ${r.question}`);
+      parts.push(`  A: ${r.answer}`);
+    }
+  }
+
+  if (data.priorArtResults && data.priorArtResults.length > 0) {
+    parts.push("\nRELEVANT PRIOR ART (from search):");
+    for (const pa of data.priorArtResults.slice(0, 10)) {
+      parts.push(`  - "${pa.title}" (relevance: ${pa.relevanceScore || "unknown"})`);
+      if (pa.abstract) {
+        const truncAbstract = pa.abstract.length > 200 ? pa.abstract.slice(0, 200) + "..." : pa.abstract;
+        parts.push(`    ${truncAbstract}`);
+      }
+    }
+  }
+
+  if (data.referenceText && data.referenceText.trim().length > 0) {
+    const truncated = data.referenceText.length > 30000
+      ? data.referenceText.slice(0, 30000) + "\n[...truncated...]"
+      : data.referenceText;
+    parts.push(`\nREFERENCE DOCUMENTS:\n${truncated}`);
+  }
+
+  if (data.generatedSections) {
+    const existing = Object.entries(data.generatedSections)
+      .filter(([, content]) => content.trim().length > 0)
+      .map(([section, content]) => `--- ${section.replace(/_/g, " ").toUpperCase()} ---\n${content}`)
+      .join("\n\n");
+
+    if (existing) {
+      parts.push(`\nALREADY WRITTEN SECTIONS:\n${existing}`);
+    }
+  }
+
+  parts.push(
+    "\nGenerate content that is consistent with all the above context. Do not repeat content already covered."
+  );
+
+  return parts.join("\n");
+}
+
+export function getCompletenessReviewPrompt(): string {
+  return `You are a senior patent attorney reviewing a patent application for completeness and quality.
+
+Analyze the provided patent application and evaluate:
+
+1. ENABLEMENT: Would a person of ordinary skill in the art (POSITA) be able to make and use the invention? Identify gaps.
+2. WRITTEN DESCRIPTION: Does the specification adequately describe the claimed invention? Are there missing details?
+3. CLAIM SCOPE: Are the claims appropriately broad? Are there opportunities for broader or additional claims?
+4. PRIOR ART RISK: Based on the background and known prior art, are there potential novelty or obviousness issues?
+5. MISSING EMBODIMENTS: Are there alternative implementations, variations, or use cases that should be disclosed?
+6. SECTION COMPLETENESS: Rate each section (0-100) for completeness.
+
+Return structured feedback with severity levels (critical, warning, info) and specific suggestions.`;
+}
+
+export function getTitleSuggestionPrompt(): string {
+  return `You are a senior patent attorney. Based on the invention disclosure provided, generate 3-5 potential patent titles.
+
+REQUIREMENTS:
+- Each title MUST be under 500 characters
+- Use clear, technical language
+- Avoid marketing language, trademarks, or brand names
+- Use the format: "[System/Method/Apparatus] for [Purpose]" or similar patent conventions
+- Capitalize first letter of each major word
+- Each title should emphasize a different aspect of the invention
+
+Return the titles as a JSON array of strings.`;
 }
 
 export function getFigureAnalysisPrompt(): string {

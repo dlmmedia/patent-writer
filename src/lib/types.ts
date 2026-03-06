@@ -13,6 +13,15 @@ import type {
   aiGenerations,
 } from "./db/schema";
 
+export type {
+  CorrespondenceAddress,
+  GovernmentContract,
+  RelatedApplication,
+  Inventor,
+  KeyFeature,
+  IntakeQA,
+} from "./db/schema";
+
 export type Patent = InferSelectModel<typeof patents>;
 export type NewPatent = InferInsertModel<typeof patents>;
 
@@ -105,4 +114,5 @@ export type PatentWithRelations = Patent & {
   drawings: PatentDrawing[];
   documents: PatentDocument[];
   referenceNumerals: ReferenceNumeral[];
+  priorArtResults?: PriorArtResult[];
 };

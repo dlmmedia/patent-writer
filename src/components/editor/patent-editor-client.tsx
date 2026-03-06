@@ -21,6 +21,7 @@ import type {
   PatentSection,
   PatentWithRelations,
   PatentDocument,
+  ReferenceNumeral,
 } from "@/lib/types";
 import { modelInfo, MODEL_PROVIDER_MAP, type ModelId } from "@/lib/ai/providers";
 import {
@@ -41,6 +42,7 @@ import {
   Trash2,
   AlertCircle,
   ImageIcon,
+  Hash,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Progress } from "@/components/ui/progress";
@@ -129,6 +131,9 @@ export function PatentEditorClient({
   const [isUploading, setIsUploading] = useState(false);
   const [showDocsPanel, setShowDocsPanel] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [showRefCheck, setShowRefCheck] = useState(false);
+  const [refCheckResults, setRefCheckResults] = useState<{ numeral: number; name: string; inSpec: boolean; inDrawings: boolean }[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
   const generateAllAbortRef = useRef<AbortController | null>(null);
@@ -636,6 +641,38 @@ export function PatentEditorClient({
     toast.success("Content replaced");
   }
 
+  const WORD_TARGETS: Partial<Record<SectionType, number>> = {
+    field_of_invention: 50,
+    background: 300,
+    summary: 300,
+    brief_description_drawings: 100,
+    detailed_description: 1500,
+    claims: 200,
+    abstract: 50,
+  };
+
+  function checkRefNumeralConsistency() {
+    const specText = localSections
+      .filter((s) => s.sectionType === "detailed_description" || s.sectionType === "brief_description_drawings")
+      .map((s) => s.plainText || "")
+      .join(" ");
+
+    const refNumerals = (patent.referenceNumerals || []) as ReferenceNumeral[];
+
+    const results = refNumerals.map((rn) => {
+      const pattern = new RegExp(`\\b${rn.numeral}\\b`);
+      return {
+        numeral: rn.numeral,
+        name: rn.elementName,
+        inSpec: pattern.test(specText),
+        inDrawings: !!rn.firstFigureId,
+      };
+    });
+
+    setRefCheckResults(results);
+    setShowRefCheck(true);
+  }
+
   const normalizedContent =
     activeSection?.content && Array.isArray(activeSection.content)
       ? activeSection.content
@@ -679,33 +716,83 @@ export function PatentEditorClient({
             const done =
               section.plainText && section.plainText.trim().length > 10;
             const active = activeSection?.id === section.id;
+            const wc = section.wordCount ?? 0;
+            const target = WORD_TARGETS[section.sectionType as SectionType];
+            const pct = target ? Math.min(100, Math.round((wc / target) * 100)) : (done ? 100 : 0);
             return (
               <button
                 key={section.id}
                 onClick={() => handleSectionSwitch(section)}
-                className={`w-full flex items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs transition-colors mb-0.5 ${
+                className={`w-full rounded-md px-2.5 py-2 text-left text-xs transition-colors mb-0.5 ${
                   active
                     ? "bg-primary text-primary-foreground font-medium"
                     : "hover:bg-accent text-foreground"
                 }`}
               >
-                {done ? (
-                  <CheckCircle2
-                    className={`size-3.5 shrink-0 ${active ? "text-primary-foreground" : "text-green-500"}`}
-                  />
-                ) : (
-                  <Circle
-                    className={`size-3.5 shrink-0 ${active ? "text-primary-foreground/70" : "text-muted-foreground"}`}
-                  />
+                <div className="flex items-center gap-2">
+                  {done ? (
+                    <CheckCircle2
+                      className={`size-3.5 shrink-0 ${active ? "text-primary-foreground" : pct >= 100 ? "text-green-500" : "text-blue-500"}`}
+                    />
+                  ) : (
+                    <Circle
+                      className={`size-3.5 shrink-0 ${active ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                    />
+                  )}
+                  <span className="truncate flex-1">
+                    {SECTION_LABELS[section.sectionType as SectionType] ??
+                      section.title}
+                  </span>
+                  <span className={`text-[10px] tabular-nums shrink-0 ${active ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    {wc}{target ? `/${target}` : ""}
+                  </span>
+                </div>
+                {target && done && (
+                  <div className={`mt-1 ml-5.5 h-0.5 rounded-full overflow-hidden ${active ? "bg-primary-foreground/20" : "bg-muted"}`}>
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        pct >= 100 ? (active ? "bg-primary-foreground" : "bg-green-500") :
+                        pct >= 50 ? (active ? "bg-primary-foreground/70" : "bg-blue-500") :
+                        (active ? "bg-primary-foreground/50" : "bg-amber-500")
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
                 )}
-                <span className="truncate">
-                  {SECTION_LABELS[section.sectionType as SectionType] ??
-                    section.title}
-                </span>
               </button>
             );
           })}
         </div>
+
+        {/* Reference Numeral Consistency Check */}
+        {patent.referenceNumerals && patent.referenceNumerals.length > 0 && (
+          <div className="border-t px-2 py-2">
+            <button
+              onClick={checkRefNumeralConsistency}
+              className="w-full flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+            >
+              <Hash className="size-3" />
+              Check Ref. Numerals ({patent.referenceNumerals.length})
+            </button>
+            {showRefCheck && refCheckResults.length > 0 && (
+              <div className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                {refCheckResults.map((r) => (
+                  <div key={r.numeral} className="flex items-center gap-1.5 text-[10px] px-2 py-0.5">
+                    {r.inSpec && r.inDrawings ? (
+                      <CheckCircle2 className="size-2.5 text-green-500 shrink-0" />
+                    ) : (
+                      <AlertCircle className="size-2.5 text-amber-500 shrink-0" />
+                    )}
+                    <span className="font-mono">{r.numeral}</span>
+                    <span className="truncate text-muted-foreground">{r.name}</span>
+                    {!r.inSpec && <Badge variant="outline" className="text-[8px] h-3 px-1 ml-auto shrink-0">not in spec</Badge>}
+                    {!r.inDrawings && <Badge variant="outline" className="text-[8px] h-3 px-1 shrink-0">no fig</Badge>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Reference Documents */}
         <div className="border-t">
