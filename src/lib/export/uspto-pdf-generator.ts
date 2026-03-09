@@ -95,13 +95,15 @@ export async function generateUsptoPdf(
         ],
       });
     } else {
-      const chromium = (await import("@sparticuz/chromium")).default;
+      const chromium = (await import("@sparticuz/chromium-min")).default;
       const puppeteer = await import("puppeteer-core");
 
       browser = await puppeteer.default.launch({
         args: chromium.args,
         defaultViewport: { width: 1280, height: 900 },
-        executablePath: await chromium.executablePath(),
+        executablePath: await chromium.executablePath(
+          "https://github.com/Sparticuz/chromium/releases/download/v143.0.4/chromium-v143.0.4-pack.x64.tar"
+        ),
         headless: true,
       });
     }

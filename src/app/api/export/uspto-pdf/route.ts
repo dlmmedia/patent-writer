@@ -3,6 +3,8 @@ import { generateUsptoPdf } from "@/lib/export/uspto-pdf-generator";
 import type { UsptoExportOptions } from "@/lib/export/uspto-html-template";
 import { getPatent } from "@/lib/actions/patents";
 
+export const maxDuration = 60;
+
 function sanitizeText(text: string | null | undefined): string {
   if (!text) return "";
   return text
