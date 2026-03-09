@@ -32,6 +32,7 @@ import {
   Download,
   Loader2,
   Wand2,
+  Scale,
 } from "lucide-react";
 import JSZip from "jszip";
 import type {
@@ -98,6 +99,7 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
     fontSize: 12,
   });
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingUsptoPdf, setDownloadingUsptoPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState(false);
   const [downloadingZip, setDownloadingZip] = useState(false);
@@ -222,6 +224,37 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
       toast.error("Failed to download drawings");
     } finally {
       setDownloadingZip(false);
+    }
+  }
+
+  async function handleDownloadUsptoPdf() {
+    setDownloadingUsptoPdf(true);
+    try {
+      const params = new URLSearchParams({ patentId: patent.id });
+      params.set("pageSize", options.pageSize);
+      if (!options.includeParagraphNumbers)
+        params.set("paragraphNumbering", "false");
+      const res = await fetch(`/api/export/uspto-pdf?${params.toString()}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${patent.title.replace(/[^a-zA-Z0-9]/g, "_")}_USPTO_Patent.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("USPTO Patent PDF downloaded");
+    } catch (err: any) {
+      console.error("Failed to download USPTO PDF:", err);
+      toast.error(err?.message || "Failed to generate USPTO Patent PDF");
+    } finally {
+      setDownloadingUsptoPdf(false);
     }
   }
 
@@ -478,6 +511,36 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
         </CardContent>
       </Card>
 
+      {/* USPTO Patent Format PDF */}
+      <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Scale className="h-4 w-4 text-amber-600" />
+            USPTO Patent Format PDF
+            <Badge variant="secondary" className="text-xs">Professional</Badge>
+          </CardTitle>
+          <CardDescription>
+            Authentic USPTO granted-patent layout with two-column specification,
+            INID-coded cover page with barcode, drawing sheets, and proper
+            column/line formatting matching real US patent documents.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            className="w-full"
+            onClick={handleDownloadUsptoPdf}
+            disabled={downloadingUsptoPdf}
+          >
+            {downloadingUsptoPdf ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            {downloadingUsptoPdf ? "Generating USPTO PDF..." : "Download USPTO Patent PDF"}
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Export Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         {/* PDF Export */}
@@ -485,16 +548,17 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
           <CardHeader className="flex-1">
             <CardTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-red-500" />
-              PDF Document
+              Simple PDF
             </CardTitle>
             <CardDescription>
-              USPTO-compliant PDF with proper margins, font sizing, and section
+              Single-column PDF with proper margins, font sizing, and section
               formatting. Ready for electronic filing.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button
               className="w-full"
+              variant="outline"
               onClick={() => handleDownload("pdf", setDownloadingPdf)}
               disabled={downloadingPdf}
             >
@@ -503,7 +567,7 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
               ) : (
                 <FileDown className="h-4 w-4 mr-2" />
               )}
-              {downloadingPdf ? "Generating PDF..." : "Download PDF"}
+              {downloadingPdf ? "Generating PDF..." : "Download Simple PDF"}
             </Button>
           </CardContent>
         </Card>
