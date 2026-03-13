@@ -35,8 +35,8 @@ export type ImageModelId = keyof typeof IMAGE_MODEL_PROVIDER_MAP;
 
 const MODEL_SDK_IDS: Record<ModelId, string> = {
   "gemini-3.1-pro": "gemini-3.1-pro-preview",
-  "gemini-2.5-flash": "gemini-2.5-flash-preview-05-20",
-  "gemini-2.5-pro": "gemini-2.5-pro-preview-05-06",
+  "gemini-2.5-flash": "gemini-2.5-flash",
+  "gemini-2.5-pro": "gemini-2.5-pro",
   "gpt-4o-mini": "gpt-4o-mini",
   "gpt-4o": "gpt-4o",
   o3: "o3",
@@ -44,8 +44,8 @@ const MODEL_SDK_IDS: Record<ModelId, string> = {
 };
 
 const IMAGE_MODEL_SDK_IDS: Record<ImageModelId, string> = {
-  "nano-banana-2": "gemini-3-1-flash-image-preview",
-  "gemini-2.5-flash-image": "gemini-2.5-flash-preview-05-20",
+  "nano-banana-2": "gemini-3.1-flash-image-preview",
+  "gemini-2.5-flash-image": "gemini-2.5-flash-image",
   "imagen-4": "imagen-4.0-generate-001",
   "gpt-image-1": "gpt-image-1",
 };
