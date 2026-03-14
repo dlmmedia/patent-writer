@@ -64,7 +64,7 @@ interface FigureGenerationState {
   error?: string;
 }
 
-type FigurePhase = "idle" | "analyzing" | "generating" | "complete";
+type FigurePhase = "idle" | "analyzing" | "generating" | "complete" | "error";
 
 function textToEditorContent(text: string) {
   const paragraphs = text.split(/\n\n+/).filter((p) => p.trim());
@@ -441,6 +441,10 @@ export function PatentEditorClient({
               errorCount++;
               errorMessages.push(`${data.section}: ${data.error}`);
             }
+            if (data.figureNumber && data.error) {
+              errorCount++;
+              errorMessages.push(`Figure ${data.figureNumber}: ${data.error}`);
+            }
             if (
               data.section &&
               data.content !== undefined &&
@@ -597,13 +601,17 @@ export function PatentEditorClient({
         )
       );
     } else if (data.figureNumber && data.error) {
-      setFigureStates((prev) =>
-        prev.map((f) =>
-          f.figureNumber === data.figureNumber
-            ? { ...f, status: "error", error: data.error }
-            : f
-        )
-      );
+      if (data.figureNumber === "all") {
+        setFigurePhase("error");
+      } else {
+        setFigureStates((prev) =>
+          prev.map((f) =>
+            f.figureNumber === data.figureNumber
+              ? { ...f, status: "error", error: data.error }
+              : f
+          )
+        );
+      }
     } else if (data.message === "All figures generated") {
       setFigurePhase("complete");
     }
@@ -913,7 +921,9 @@ export function PatentEditorClient({
                       ? "Analyzing required figures..."
                       : figurePhase === "generating"
                         ? "Generating patent figures..."
-                        : "Generating patent sections..."
+                        : figurePhase === "error"
+                          ? "Figure generation failed, finishing up..."
+                          : "Generating patent sections..."
                     : generateAllStatus === "complete"
                       ? "Generation complete"
                       : "Generation encountered errors"}
@@ -997,13 +1007,18 @@ export function PatentEditorClient({
                   {figurePhase === "complete" && (
                     <CheckCircle2 className="size-3 text-green-500" />
                   )}
+                  {figurePhase === "error" && (
+                    <AlertCircle className="size-3 text-destructive" />
+                  )}
                   <span className="text-[11px] font-medium flex items-center gap-1">
                     <ImageIcon className="size-3" />
                     {figurePhase === "analyzing"
                       ? "Analyzing required figures..."
                       : figurePhase === "generating"
                         ? "Generating figures..."
-                        : "Figures complete"}
+                        : figurePhase === "error"
+                          ? "Figure generation failed"
+                          : "Figures complete"}
                   </span>
                 </div>
                 {figureStates.length > 0 && (

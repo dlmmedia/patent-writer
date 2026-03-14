@@ -268,6 +268,7 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
           patentId: patent.id,
           model: "gemini-3.1-pro",
           skipExisting: true,
+          generateFigures: false,
         }),
       });
 

@@ -88,6 +88,7 @@ export async function POST(req: Request) {
       system: getFigureAnalysisPrompt(),
       prompt: context,
       schema: figureAnalysisSchema,
+      abortSignal: AbortSignal.timeout(120_000),
     });
 
     return Response.json(result.object);

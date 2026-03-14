@@ -223,6 +223,7 @@ export async function POST(req: Request) {
                 system: getSystemPrompt("claims", patent.jurisdiction),
                 prompt: `${context}\n\nGenerate a comprehensive set of patent claims (3 independent + dependent claims, approximately 15-20 total). Include method, system, and apparatus claim types.`,
                 schema: claimSchema,
+                abortSignal: AbortSignal.timeout(120_000),
               });
 
               await db
@@ -311,6 +312,7 @@ export async function POST(req: Request) {
               model: aiModel,
               system: systemPrompt,
               prompt: context,
+              abortSignal: AbortSignal.timeout(120_000),
             });
 
             let accumulated = "";
@@ -354,6 +356,7 @@ export async function POST(req: Request) {
               content: accumulated,
             });
           } catch (err) {
+            console.error(`Section ${sectionType} generation error:`, err);
             const message =
               err instanceof Error ? err.message : "Unknown error";
             send("section_error", {
@@ -378,6 +381,7 @@ export async function POST(req: Request) {
               system: getFigureAnalysisPrompt(),
               prompt: figureContext,
               schema: figureAnalysisSchema,
+              abortSignal: AbortSignal.timeout(120_000),
             });
 
             const figures = figureResult.object.figures;
@@ -500,6 +504,7 @@ export async function POST(req: Request) {
                     model: aiModel,
                     system: briefPrompt,
                     prompt: briefContext,
+                    abortSignal: AbortSignal.timeout(120_000),
                   });
 
                   let briefAccumulated = "";
@@ -551,6 +556,7 @@ export async function POST(req: Request) {
               }
             }
           } catch (err) {
+            console.error("Figure analysis/generation error:", err);
             const message =
               err instanceof Error ? err.message : "Unknown error";
             send("figure_error", {
