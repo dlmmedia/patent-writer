@@ -357,11 +357,11 @@ export async function POST(req: Request) {
             });
           } catch (err) {
             console.error(`Section ${sectionType} generation error:`, err);
-            const message =
-              err instanceof Error ? err.message : "Unknown error";
+            const errorDetail = extractErrorDetail(err);
             send("section_error", {
               section: sectionType,
-              error: message,
+              error: errorDetail.message,
+              statusCode: errorDetail.statusCode,
             });
           }
         }
@@ -468,12 +468,12 @@ export async function POST(req: Request) {
                       drawingId: drawing.id,
                     });
                   } catch (err) {
-                    const message =
-                      err instanceof Error ? err.message : "Unknown error";
+                    const errorDetail = extractErrorDetail(err);
                     send("figure_error", {
                       figureNumber: figure.figureNumber,
                       label: figure.label,
-                      error: message,
+                      error: errorDetail.message,
+                      statusCode: errorDetail.statusCode,
                     });
                   }
                 };
@@ -557,12 +557,12 @@ export async function POST(req: Request) {
             }
           } catch (err) {
             console.error("Figure analysis/generation error:", err);
-            const message =
-              err instanceof Error ? err.message : "Unknown error";
+            const errorDetail = extractErrorDetail(err);
             send("figure_error", {
               figureNumber: "all",
               label: "Figure analysis",
-              error: message,
+              error: errorDetail.message,
+              statusCode: errorDetail.statusCode,
             });
           }
         }
@@ -645,6 +645,20 @@ async function runWithConcurrency<T>(
     if (executing.size >= limit) await Promise.race(executing);
   }
   await Promise.allSettled([...executing]);
+}
+
+function extractErrorDetail(err: unknown): { message: string; statusCode?: number } {
+  if (!(err instanceof Error)) return { message: String(err) };
+  const e = err as Error & { statusCode?: number; responseBody?: unknown; url?: string; cause?: unknown };
+  let message = err.message;
+  if (e.statusCode) {
+    message = `[${e.statusCode}] ${message}`;
+  }
+  if (e.responseBody) {
+    const body = typeof e.responseBody === "string" ? e.responseBody : JSON.stringify(e.responseBody);
+    console.error("AI API response body:", body.substring(0, 2000));
+  }
+  return { message: message.substring(0, 500), statusCode: e.statusCode };
 }
 
 function buildImagePrompt(figure: {
