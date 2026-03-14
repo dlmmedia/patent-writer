@@ -1,3 +1,5 @@
+export const maxDuration = 300;
+
 import { streamText, generateObject, generateImage } from "ai";
 import { z } from "zod";
 import {
@@ -404,7 +406,7 @@ export async function POST(req: Request) {
               if (hasImageModel) {
                 const imgModel = getImageModel(imgModelId);
 
-                for (const figure of figures) {
+                const generateFigure = async (figure: typeof figures[number]) => {
                   send("figure_generating", {
                     figureNumber: figure.figureNumber,
                     label: figure.label,
@@ -417,6 +419,7 @@ export async function POST(req: Request) {
                     const generateOptions: Parameters<typeof generateImage>[0] = {
                       model: imgModel,
                       prompt,
+                      abortSignal: AbortSignal.timeout(120_000),
                     };
 
                     if (isOpenAIImageModel(imgModelId)) {
@@ -469,7 +472,9 @@ export async function POST(req: Request) {
                       error: message,
                     });
                   }
-                }
+                };
+
+                await runWithConcurrency(figures, generateFigure, 3);
               }
 
               send("figures_complete", { message: "All figures generated" });
@@ -620,6 +625,20 @@ function buildFigureAnalysisContext(
   );
 
   return parts.join("\n");
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  fn: (item: T) => Promise<void>,
+  limit: number
+): Promise<void> {
+  const executing = new Set<Promise<void>>();
+  for (const item of items) {
+    const p = fn(item).finally(() => executing.delete(p));
+    executing.add(p);
+    if (executing.size >= limit) await Promise.race(executing);
+  }
+  await Promise.allSettled([...executing]);
 }
 
 function buildImagePrompt(figure: {

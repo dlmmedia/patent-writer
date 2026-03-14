@@ -1,3 +1,5 @@
+export const maxDuration = 300;
+
 import { generateImage } from "ai";
 import {
   getImageModel,
@@ -45,6 +47,20 @@ function buildImagePrompt(figure: FigureSpec): string {
   prompt += ` Title: FIG. ${figure.figureNumber} - ${figure.label}`;
 
   return prompt;
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  fn: (item: T) => Promise<void>,
+  limit: number
+): Promise<void> {
+  const executing = new Set<Promise<void>>();
+  for (const item of items) {
+    const p = fn(item).finally(() => executing.delete(p));
+    executing.add(p);
+    if (executing.size >= limit) await Promise.race(executing);
+  }
+  await Promise.allSettled([...executing]);
 }
 
 export async function POST(req: Request) {
@@ -106,7 +122,7 @@ export async function POST(req: Request) {
 
         send("figures_start", { total: figures.length });
 
-        for (const figure of figures) {
+        const generateFigure = async (figure: FigureSpec) => {
           send("figure_generating", {
             figureNumber: figure.figureNumber,
             label: figure.label,
@@ -119,6 +135,7 @@ export async function POST(req: Request) {
             const generateOptions: Parameters<typeof generateImage>[0] = {
               model: imgModel,
               prompt,
+              abortSignal: AbortSignal.timeout(120_000),
             };
 
             if (isOpenAIImageModel(modelId)) {
@@ -171,7 +188,9 @@ export async function POST(req: Request) {
               error: message,
             });
           }
-        }
+        };
+
+        await runWithConcurrency(figures, generateFigure, 3);
 
         send("figures_complete", { message: "All figures generated" });
         controller.close();

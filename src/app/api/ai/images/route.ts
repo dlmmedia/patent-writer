@@ -46,6 +46,7 @@ export async function POST(req: Request) {
     const generateOptions: Parameters<typeof generateImage>[0] = {
       model: imageModel,
       prompt: fullPrompt,
+      abortSignal: AbortSignal.timeout(120_000),
     };
 
     if (isOpenAIImageModel(modelId)) {
