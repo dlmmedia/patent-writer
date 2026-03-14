@@ -22,7 +22,6 @@ export async function GET() {
       const result = await generateText({
         model,
         prompt: "Say OK",
-        maxTokens: 5,
         abortSignal: AbortSignal.timeout(15_000),
       });
       results[provider] = { status: "ok", text: result.text };
