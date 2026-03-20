@@ -10,8 +10,15 @@ import {
   referenceNumerals,
   priorArtSearches,
   priorArtResults,
+  priorArtSearchMatrices,
   patentVersions,
   templates,
+} from "@/lib/db/schema";
+import type {
+  CpcEntry,
+  CombinedQuery,
+  SearchWorkflow,
+  KeywordGroup,
 } from "@/lib/db/schema";
 import { eq, desc, asc, sql } from "drizzle-orm";
 import type {
@@ -342,6 +349,10 @@ export async function savePriorArtSearch(data: {
   query: string;
   apiSources: string[];
   resultCount: number;
+  keywordGroupsUsed?: KeywordGroup[];
+  cpcFilters?: string[];
+  searchStrategy?: string;
+  matrixId?: string;
 }) {
   const [search] = await db.insert(priorArtSearches).values(data).returning();
   revalidatePath(`/patents/${data.patentId}/prior-art`);
@@ -361,6 +372,9 @@ export async function savePriorArtResults(
     riskLevel?: "high" | "medium" | "low";
     sourceApi: string;
     externalUrl?: string;
+    matchedQuery?: string;
+    matchedCpcCodes?: string[];
+    cpcOverlapScore?: number;
   }[]
 ) {
   if (results.length === 0) return [];
@@ -425,6 +439,62 @@ export async function createTemplate(data: {
 export async function deleteTemplate(id: string) {
   await db.delete(templates).where(eq(templates.id, id));
   revalidatePath("/templates");
+}
+
+// ─── Search Matrices ──────────────────────────────────────────
+
+export async function getSearchMatrices(patentId: string) {
+  return db.query.priorArtSearchMatrices.findMany({
+    where: eq(priorArtSearchMatrices.patentId, patentId),
+    orderBy: [desc(priorArtSearchMatrices.createdAt)],
+  });
+}
+
+export async function getSearchMatrix(id: string) {
+  return db.query.priorArtSearchMatrices.findFirst({
+    where: eq(priorArtSearchMatrices.id, id),
+  });
+}
+
+export async function getLatestSearchMatrix(patentId: string) {
+  return db.query.priorArtSearchMatrices.findFirst({
+    where: eq(priorArtSearchMatrices.patentId, patentId),
+    orderBy: [desc(priorArtSearchMatrices.createdAt)],
+  });
+}
+
+export async function saveSearchMatrix(data: {
+  patentId: string;
+  cpcEntries: CpcEntry[];
+  combinedQueries: CombinedQuery[];
+  searchWorkflow?: SearchWorkflow;
+  keywordGroups?: KeywordGroup[];
+  strongestTerms?: {
+    structureTerms: string[];
+    conversionTerms: string[];
+    cleanupTerms: string[];
+    inputFormatTerms: string[];
+  };
+  priorArtRiskAreas?: {
+    area: string;
+    description: string;
+    likelyCpcCodes: string[];
+  }[];
+  generatedByModel?: string;
+}) {
+  const [matrix] = await db
+    .insert(priorArtSearchMatrices)
+    .values(data)
+    .returning();
+  revalidatePath(`/patents/${data.patentId}/prior-art`);
+  return matrix;
+}
+
+export async function deleteSearchMatrix(id: string, patentId: string) {
+  await db
+    .delete(priorArtSearchMatrices)
+    .where(eq(priorArtSearchMatrices.id, id));
+  revalidatePath(`/patents/${patentId}/prior-art`);
 }
 
 // ─── Reference Documents ──────────────────────────────────────

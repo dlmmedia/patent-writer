@@ -8,6 +8,7 @@ import type {
   referenceNumerals,
   priorArtSearches,
   priorArtResults,
+  priorArtSearchMatrices,
   templates,
   patentVersions,
   aiGenerations,
@@ -20,6 +21,10 @@ export type {
   Inventor,
   KeyFeature,
   IntakeQA,
+  CpcEntry,
+  CombinedQuery,
+  SearchWorkflow,
+  KeywordGroup,
 } from "./db/schema";
 
 export type Patent = InferSelectModel<typeof patents>;
@@ -42,6 +47,7 @@ export type NewReferenceNumeral = InferInsertModel<typeof referenceNumerals>;
 
 export type PriorArtSearch = InferSelectModel<typeof priorArtSearches>;
 export type PriorArtResult = InferSelectModel<typeof priorArtResults>;
+export type PriorArtSearchMatrix = InferSelectModel<typeof priorArtSearchMatrices>;
 
 export type Template = InferSelectModel<typeof templates>;
 export type PatentVersion = InferSelectModel<typeof patentVersions>;

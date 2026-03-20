@@ -271,6 +271,60 @@ export const referenceNumerals = pgTable("reference_numerals", {
 
 // ─── Prior Art ───────────────────────────────────────────────
 
+export type CpcEntry = {
+  cpcCode: string;
+  plainEnglishFocus: string;
+  keywords: string[];
+  starterQueries: string[];
+  relevanceRanking: number;
+  reclassificationNotes?: string;
+};
+
+export type CombinedQuery = {
+  description: string;
+  queryString: string;
+};
+
+export type SearchWorkflow = {
+  passes: {
+    step: number;
+    name: string;
+    description: string;
+    whatToLookFor: string;
+    queries: string[];
+  }[];
+};
+
+export type KeywordGroup = {
+  category: string;
+  description: string;
+  keywords: string[];
+};
+
+export const priorArtSearchMatrices = pgTable("prior_art_search_matrices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  patentId: uuid("patent_id")
+    .notNull()
+    .references(() => patents.id, { onDelete: "cascade" }),
+  cpcEntries: jsonb("cpc_entries").$type<CpcEntry[]>().default([]),
+  combinedQueries: jsonb("combined_queries").$type<CombinedQuery[]>().default([]),
+  searchWorkflow: jsonb("search_workflow").$type<SearchWorkflow>(),
+  keywordGroups: jsonb("keyword_groups").$type<KeywordGroup[]>().default([]),
+  strongestTerms: jsonb("strongest_terms").$type<{
+    structureTerms: string[];
+    conversionTerms: string[];
+    cleanupTerms: string[];
+    inputFormatTerms: string[];
+  }>(),
+  priorArtRiskAreas: jsonb("prior_art_risk_areas").$type<{
+    area: string;
+    description: string;
+    likelyCpcCodes: string[];
+  }[]>().default([]),
+  generatedByModel: text("generated_by_model"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const priorArtSearches = pgTable("prior_art_searches", {
   id: uuid("id").primaryKey().defaultRandom(),
   patentId: uuid("patent_id")
@@ -279,6 +333,10 @@ export const priorArtSearches = pgTable("prior_art_searches", {
   query: text("query").notNull(),
   apiSources: jsonb("api_sources").$type<string[]>().default([]),
   resultCount: integer("result_count").default(0),
+  keywordGroupsUsed: jsonb("keyword_groups_used").$type<KeywordGroup[]>(),
+  cpcFilters: jsonb("cpc_filters").$type<string[]>(),
+  searchStrategy: text("search_strategy"),
+  matrixId: uuid("matrix_id").references(() => priorArtSearchMatrices.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -301,6 +359,9 @@ export const priorArtResults = pgTable("prior_art_results", {
   sourceApi: text("source_api").notNull(),
   externalUrl: text("external_url"),
   addedToIds: boolean("added_to_ids").default(false),
+  matchedQuery: text("matched_query"),
+  matchedCpcCodes: jsonb("matched_cpc_codes").$type<string[]>(),
+  cpcOverlapScore: real("cpc_overlap_score"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -358,6 +419,7 @@ export const patentsRelations = relations(patents, ({ many }) => ({
   documents: many(patentDocuments),
   referenceNumerals: many(referenceNumerals),
   priorArtSearches: many(priorArtSearches),
+  priorArtSearchMatrices: many(priorArtSearchMatrices),
   versions: many(patentVersions),
   aiGenerations: many(aiGenerations),
 }));
@@ -405,10 +467,21 @@ export const referenceNumeralsRelations = relations(referenceNumerals, ({ one })
   }),
 }));
 
+export const priorArtSearchMatricesRelations = relations(priorArtSearchMatrices, ({ one }) => ({
+  patent: one(patents, {
+    fields: [priorArtSearchMatrices.patentId],
+    references: [patents.id],
+  }),
+}));
+
 export const priorArtSearchesRelations = relations(priorArtSearches, ({ one, many }) => ({
   patent: one(patents, {
     fields: [priorArtSearches.patentId],
     references: [patents.id],
+  }),
+  matrix: one(priorArtSearchMatrices, {
+    fields: [priorArtSearches.matrixId],
+    references: [priorArtSearchMatrices.id],
   }),
   results: many(priorArtResults),
 }));

@@ -1,4 +1,4 @@
-import { getPatent, getPriorArtResults } from "@/lib/actions/patents";
+import { getPatent, getPriorArtResults, getLatestSearchMatrix } from "@/lib/actions/patents";
 import { notFound } from "next/navigation";
 import { PriorArtClient } from "@/components/prior-art/prior-art-client";
 
@@ -15,11 +15,13 @@ export default async function PriorArtPage({
   }
 
   const existingResults = await getPriorArtResults(id);
+  const latestMatrix = await getLatestSearchMatrix(id);
 
   return (
     <PriorArtClient
       patent={patent}
       initialResults={existingResults}
+      initialMatrix={latestMatrix}
     />
   );
 }

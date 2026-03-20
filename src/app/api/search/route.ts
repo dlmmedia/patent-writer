@@ -9,12 +9,17 @@ interface SearchResult {
   filingDate: string;
   sourceApi: string;
   externalUrl: string;
+  matchedQuery?: string;
+  matchedCpcCodes?: string[];
 }
 
 interface SearchRequest {
   query: string;
   sources: string[];
   patentId?: string;
+  cpcCodes?: string[];
+  keywordGroups?: { category: string; keywords: string[] }[];
+  searchStrategy?: string;
 }
 
 // ─── PatentsView (USPTO PatentSearch API, requires API key) ──
@@ -147,26 +152,48 @@ async function searchUsptoData(query: string): Promise<SearchResult[]> {
     .filter((result): result is SearchResult => result !== null);
 }
 
-async function searchPatentsView(query: string): Promise<SearchResult[]> {
+async function searchPatentsView(
+  query: string,
+  cpcCodes?: string[]
+): Promise<SearchResult[]> {
   const apiKey = process.env.PATENTSVIEW_API_KEY?.trim();
   if (!apiKey) {
     return searchUsptoData(query);
   }
 
   const url = "https://search.patentsview.org/api/v1/patent/";
-  const body = {
-    q: {
-      _or: [
-        { _text_any: { patent_title: query } },
-        { _text_any: { patent_abstract: query } },
+
+  const textConditions = [
+    { _text_any: { patent_title: query } },
+    { _text_any: { patent_abstract: query } },
+  ];
+
+  let qFilter: Record<string, unknown>;
+
+  if (cpcCodes && cpcCodes.length > 0) {
+    const cpcConditions = cpcCodes.map((code) => ({
+      _begins: { cpc_group_id: code.replace(/\s/g, "") },
+    }));
+
+    qFilter = {
+      _and: [
+        { _or: textConditions },
+        { _or: cpcConditions },
       ],
-    },
+    };
+  } else {
+    qFilter = { _or: textConditions };
+  }
+
+  const body = {
+    q: qFilter,
     f: [
       "patent_id",
       "patent_title",
       "patent_abstract",
       "patent_date",
       "assignees.assignee_organization",
+      "cpcs.cpc_group_id",
     ],
     o: { size: 25 },
   };
@@ -194,7 +221,6 @@ async function searchPatentsView(query: string): Promise<SearchResult[]> {
   if (!res.ok) {
     const errorBody = await readErrorBody(res);
     if (res.status === 403) {
-      // If this key is actually a USPTO data key, use USPTO ODP search instead.
       return searchUsptoData(query);
     }
     throw new Error(
@@ -217,6 +243,7 @@ async function searchPatentsView(query: string): Promise<SearchResult[]> {
       patent_abstract: string;
       patent_date: string;
       assignees?: { assignee_organization: string }[];
+      cpcs?: { cpc_group_id: string }[];
     }) => ({
       id: `pv-${p.patent_id}`,
       patentNumber: `US${p.patent_id}`,
@@ -227,6 +254,7 @@ async function searchPatentsView(query: string): Promise<SearchResult[]> {
       filingDate: p.patent_date || "",
       sourceApi: "patentsview",
       externalUrl: `https://patents.google.com/patent/US${p.patent_id}`,
+      matchedCpcCodes: p.cpcs?.map((c) => c.cpc_group_id).filter(Boolean),
     })
   );
 }
@@ -340,10 +368,21 @@ async function fetchEpoBiblio(
   }
 }
 
-async function searchEpo(query: string): Promise<SearchResult[]> {
+async function searchEpo(
+  query: string,
+  cpcCodes?: string[]
+): Promise<SearchResult[]> {
   const token = await getEpoToken();
-  const encoded = encodeURIComponent(query);
-  const url = `https://ops.epo.org/3.2/rest-services/published-data/search?q=ta%3D${encoded}&Range=1-25`;
+
+  let queryStr = `ta%3D${encodeURIComponent(query)}`;
+  if (cpcCodes && cpcCodes.length > 0) {
+    const cpcQuery = cpcCodes
+      .map((code) => `"${code.replace(/\s/g, "")}"`)
+      .join(" OR ");
+    queryStr += `%20AND%20ic%3D(${encodeURIComponent(cpcQuery)})`;
+  }
+
+  const url = `https://ops.epo.org/3.2/rest-services/published-data/search?q=${queryStr}&Range=1-25`;
 
   const res = await fetch(url, {
     headers: {
@@ -423,17 +462,44 @@ function deduplicateResults(results: SearchResult[]): SearchResult[] {
   return Array.from(map.values());
 }
 
+// ─── Query building helpers ─────────────────────────────────
+
+function buildQueryFromKeywords(
+  baseQuery: string,
+  keywordGroups?: { category: string; keywords: string[] }[]
+): string[] {
+  if (!keywordGroups || keywordGroups.length === 0) return [baseQuery];
+
+  const queries: string[] = [baseQuery];
+
+  for (const group of keywordGroups) {
+    if (group.keywords.length === 0) continue;
+    const keywordPart = group.keywords.slice(0, 5).join(" OR ");
+    queries.push(`(${baseQuery}) AND (${keywordPart})`);
+  }
+
+  return queries;
+}
+
 // ─── POST handler ───────────────────────────────────────────
 
-const searchFunctions: Record<string, (q: string) => Promise<SearchResult[]>> =
-  {
-    patentsview: searchPatentsView,
-    epo: searchEpo,
-  };
+type SearchFn = (q: string, cpcCodes?: string[]) => Promise<SearchResult[]>;
+
+const searchFunctions: Record<string, SearchFn> = {
+  patentsview: searchPatentsView,
+  epo: searchEpo,
+};
 
 export async function POST(req: Request) {
   try {
-    const { query, sources, patentId } = (await req.json()) as SearchRequest;
+    const {
+      query,
+      sources,
+      patentId,
+      cpcCodes,
+      keywordGroups,
+      searchStrategy,
+    } = (await req.json()) as SearchRequest;
 
     if (!query || typeof query !== "string" || query.trim().length === 0) {
       return NextResponse.json(
@@ -464,21 +530,33 @@ export async function POST(req: Request) {
       );
     }
 
-    const settled = await Promise.allSettled(
-      activeSources.map((src) => searchFunctions[src](query.trim()))
-    );
+    const queries = buildQueryFromKeywords(query.trim(), keywordGroups);
+    const cpcFilters = cpcCodes?.filter(Boolean);
 
     const allResults: SearchResult[] = [];
     const errors: string[] = [];
 
-    settled.forEach((outcome, idx) => {
-      if (outcome.status === "fulfilled") {
-        allResults.push(...outcome.value);
-      } else {
-        errors.push(`${activeSources[idx]}: ${outcome.reason?.message ?? "Unknown error"}`);
-        console.error(`Search source ${activeSources[idx]} failed:`, outcome.reason);
-      }
-    });
+    for (const q of queries) {
+      const settled = await Promise.allSettled(
+        activeSources.map((src) => searchFunctions[src](q, cpcFilters))
+      );
+
+      settled.forEach((outcome, idx) => {
+        if (outcome.status === "fulfilled") {
+          const taggedResults = outcome.value.map((r) => ({
+            ...r,
+            matchedQuery: q,
+          }));
+          allResults.push(...taggedResults);
+        } else {
+          const errMsg = `${activeSources[idx]}: ${outcome.reason?.message ?? "Unknown error"}`;
+          if (!errors.includes(errMsg)) {
+            errors.push(errMsg);
+          }
+          console.error(`Search source ${activeSources[idx]} failed:`, outcome.reason);
+        }
+      });
+    }
 
     const deduplicated = deduplicateResults(allResults);
 
@@ -489,6 +567,9 @@ export async function POST(req: Request) {
         patentId: patentId || null,
         sources: activeSources,
         totalResults: deduplicated.length,
+        queriesExecuted: queries,
+        cpcFilters: cpcFilters || [],
+        searchStrategy: searchStrategy || "standard",
         errors: errors.length > 0 ? errors : undefined,
       },
     });

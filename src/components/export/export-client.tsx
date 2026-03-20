@@ -33,6 +33,9 @@ import {
   Loader2,
   Wand2,
   Scale,
+  Search,
+  Tag,
+  Grid3X3,
 } from "lucide-react";
 import JSZip from "jszip";
 import type {
@@ -775,6 +778,85 @@ export function ExportClient({ patent, priorArtResults }: ExportClientProps) {
               )}
               {downloadingIds ? "Generating..." : "Generate IDS"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      {/* Research Documents */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Search className="h-4 w-4 text-indigo-500" />
+            Research Documents
+          </CardTitle>
+          <CardDescription>
+            Download documents that show how prior art search decisions were made,
+            including the CPC search matrix, keyword analysis, and full prior art report.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Grid3X3 className="h-4 w-4 text-indigo-500" />
+                <span className="text-sm font-medium">CPC Search Matrix</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Structured table mapping CPC codes to search keywords, starter queries,
+                and a recommended 3-pass search workflow.
+              </p>
+              <a
+                href={`/api/export/search-matrix?patentId=${patent.id}`}
+                download
+              >
+                <Button variant="outline" size="sm" className="w-full gap-2">
+                  <FileDown className="h-3.5 w-3.5" />
+                  Download Search Matrix
+                </Button>
+              </a>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Shield className="h-4 w-4 text-amber-500" />
+                <span className="text-sm font-medium">Prior Art Report</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Comprehensive report with executive summary, search methodology,
+                results table, AI analysis, and IDS candidates.
+              </p>
+              <a
+                href={`/api/export/prior-art-report?patentId=${patent.id}`}
+                download
+              >
+                <Button variant="outline" size="sm" className="w-full gap-2">
+                  <FileDown className="h-3.5 w-3.5" />
+                  Download Prior Art Report
+                </Button>
+              </a>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Tag className="h-4 w-4 text-green-500" />
+                <span className="text-sm font-medium">Keyword Analysis</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Keyword groups, substitute terms, CPC code analysis, and suggested
+                search strings used for prior art discovery.
+              </p>
+              <a
+                href={`/api/export/keyword-report?patentId=${patent.id}`}
+                download
+              >
+                <Button variant="outline" size="sm" className="w-full gap-2">
+                  <FileDown className="h-3.5 w-3.5" />
+                  Download Keyword Analysis
+                </Button>
+              </a>
+            </div>
           </div>
         </CardContent>
       </Card>

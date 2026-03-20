@@ -13,13 +13,14 @@ import {
   type ColumnFiltersState,
 } from "@tanstack/react-table";
 import { useMutation } from "@tanstack/react-query";
-import type { Patent, PriorArtResult, RiskLevel } from "@/lib/types";
+import type { Patent, PriorArtResult, PriorArtSearchMatrix, RiskLevel } from "@/lib/types";
 import {
   savePriorArtSearch,
   savePriorArtResults,
   togglePriorArtIDS,
+  saveSearchMatrix,
 } from "@/lib/actions/patents";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,11 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   Search,
   ExternalLink,
   AlertTriangle,
@@ -56,10 +62,56 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Eye,
   ImageIcon,
+  Sparkles,
+  Grid3X3,
+  Tag,
+  X,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
+
+interface KeywordGroup {
+  category: string;
+  description: string;
+  keywords: string[];
+}
+
+interface SearchMatrixEntry {
+  cpcCode: string;
+  plainEnglishFocus: string;
+  keywords: string[];
+  starterQueries: string[];
+  relevanceRanking: number;
+  reclassificationNotes?: string;
+}
+
+interface SearchMatrixData {
+  cpcEntries: SearchMatrixEntry[];
+  combinedQueries: { description: string; queryString: string }[];
+  searchWorkflow: {
+    passes: {
+      step: number;
+      name: string;
+      description: string;
+      whatToLookFor: string;
+      queries: string[];
+    }[];
+  };
+  strongestTerms: {
+    structureTerms: string[];
+    conversionTerms: string[];
+    cleanupTerms: string[];
+    inputFormatTerms: string[];
+  };
+  priorArtRiskAreas: {
+    area: string;
+    description: string;
+    likelyCpcCodes: string[];
+  }[];
+}
 
 interface SearchApiResult {
   id: string;
@@ -108,6 +160,7 @@ interface PriorArtClientProps {
     claims: { id: string; fullText: string }[];
   };
   initialResults: PriorArtResult[];
+  initialMatrix?: PriorArtSearchMatrix | null;
 }
 
 const RISK_CONFIG: Record<RiskLevel, { label: string; className: string }> = {
@@ -143,6 +196,7 @@ function buildClaimText(patent: PriorArtClientProps["patent"]): string {
 export function PriorArtClient({
   patent,
   initialResults,
+  initialMatrix,
 }: PriorArtClientProps) {
   const [query, setQuery] = React.useState("");
   const [sourcePatentsView, setSourcePatentsView] = React.useState(true);
@@ -188,10 +242,132 @@ export function PriorArtClient({
   );
   const [sourceFilter, setSourceFilter] = React.useState<string>("all");
 
+  // Keyword groups & CPC filters
+  const [keywordGroups, setKeywordGroups] = React.useState<KeywordGroup[]>([]);
+  const [selectedKeywordGroups, setSelectedKeywordGroups] = React.useState<Set<number>>(new Set());
+  const [generatingKeywords, setGeneratingKeywords] = React.useState(false);
+  const [activeCpcFilters, setActiveCpcFilters] = React.useState<Set<string>>(new Set());
+  const [keywordsOpen, setKeywordsOpen] = React.useState(false);
+
+  // Search matrix
+  const [searchMatrix, setSearchMatrix] = React.useState<SearchMatrixData | null>(
+    initialMatrix ? {
+      cpcEntries: (initialMatrix.cpcEntries as SearchMatrixEntry[]) || [],
+      combinedQueries: (initialMatrix.combinedQueries as SearchMatrixData["combinedQueries"]) || [],
+      searchWorkflow: (initialMatrix.searchWorkflow as SearchMatrixData["searchWorkflow"]) || { passes: [] },
+      strongestTerms: (initialMatrix.strongestTerms as SearchMatrixData["strongestTerms"]) || { structureTerms: [], conversionTerms: [], cleanupTerms: [], inputFormatTerms: [] },
+      priorArtRiskAreas: (initialMatrix.priorArtRiskAreas as SearchMatrixData["priorArtRiskAreas"]) || [],
+    } : null
+  );
+  const [generatingMatrix, setGeneratingMatrix] = React.useState(false);
+  const [matrixOpen, setMatrixOpen] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState("search");
+
+  const patentCpcCodes = React.useMemo(
+    () => (patent.cpcCodes as string[]) || [],
+    [patent.cpcCodes]
+  );
+
   const idsCount = React.useMemo(
     () => results.filter((r) => r.addedToIds).length,
     [results]
   );
+
+  async function handleGenerateKeywords() {
+    setGeneratingKeywords(true);
+    try {
+      const res = await fetch("/api/ai/search-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inventionDescription: patent.inventionDescription || patent.title,
+          cpcCodes: patentCpcCodes,
+          keyFeatures: patent.keyFeatures,
+          jurisdiction: patent.jurisdiction,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || "Failed to generate keywords");
+      }
+      const data = await res.json();
+      setKeywordGroups(data.keywordGroups || []);
+      setKeywordsOpen(true);
+      toast.success(`Generated ${data.keywordGroups?.length || 0} keyword groups`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to generate keywords");
+    } finally {
+      setGeneratingKeywords(false);
+    }
+  }
+
+  async function handleGenerateMatrix() {
+    setGeneratingMatrix(true);
+    try {
+      const res = await fetch("/api/ai/search-matrix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inventionDescription: patent.inventionDescription || patent.title,
+          cpcCodes: patentCpcCodes,
+          keyFeatures: patent.keyFeatures,
+          technicalField: patent.technologyArea,
+          jurisdiction: patent.jurisdiction,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || "Failed to generate search matrix");
+      }
+      const data: SearchMatrixData = await res.json();
+      setSearchMatrix(data);
+      setMatrixOpen(true);
+
+      try {
+        await saveSearchMatrix({
+          patentId: patent.id,
+          cpcEntries: data.cpcEntries,
+          combinedQueries: data.combinedQueries,
+          searchWorkflow: data.searchWorkflow,
+          keywordGroups: keywordGroups.length > 0 ? keywordGroups : undefined,
+          strongestTerms: data.strongestTerms,
+          priorArtRiskAreas: data.priorArtRiskAreas,
+          generatedByModel: "gemini-3.1-pro",
+        });
+      } catch {
+        console.error("Failed to persist search matrix");
+      }
+
+      toast.success(`Generated search matrix with ${data.cpcEntries?.length || 0} CPC entries`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to generate matrix");
+    } finally {
+      setGeneratingMatrix(false);
+    }
+  }
+
+  function toggleCpcFilter(code: string) {
+    setActiveCpcFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  }
+
+  function toggleKeywordGroup(idx: number) {
+    setSelectedKeywordGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  }
+
+  function useQueryFromMatrix(queryString: string) {
+    setQuery(queryString);
+    setActiveTab("search");
+  }
 
   async function handleSearch() {
     if (!query.trim()) return;
@@ -208,6 +384,12 @@ export function PriorArtClient({
       return;
     }
 
+    const selectedGroups = keywordGroups
+      .filter((_, i) => selectedKeywordGroups.has(i))
+      .map((g) => ({ category: g.category, keywords: g.keywords }));
+
+    const cpcFilters = Array.from(activeCpcFilters);
+
     try {
       const res = await fetch("/api/search", {
         method: "POST",
@@ -216,6 +398,8 @@ export function PriorArtClient({
           query: query.trim(),
           sources,
           patentId: patent.id,
+          cpcCodes: cpcFilters.length > 0 ? cpcFilters : undefined,
+          keywordGroups: selectedGroups.length > 0 ? selectedGroups : undefined,
         }),
       });
       const data = await res.json();
@@ -228,7 +412,7 @@ export function PriorArtClient({
       );
       if (data.results && data.results.length > 0) {
         const mapped: DisplayResult[] = data.results.map(
-          (r: SearchApiResult) => ({
+          (r: SearchApiResult & { matchedQuery?: string; matchedCpcCodes?: string[] }) => ({
             ...r,
             addedToIds: false,
           })
@@ -241,11 +425,14 @@ export function PriorArtClient({
             query: query.trim(),
             apiSources: sources,
             resultCount: data.results.length,
+            keywordGroupsUsed: selectedGroups.length > 0 ? selectedGroups.map((g) => ({ ...g, description: "" })) : undefined,
+            cpcFilters: cpcFilters.length > 0 ? cpcFilters : undefined,
+            searchStrategy: cpcFilters.length > 0 ? "cpc_filtered" : "standard",
           });
           await savePriorArtResults(
             search.id,
             patent.id,
-            data.results.map((r: SearchApiResult) => ({
+            data.results.map((r: SearchApiResult & { matchedQuery?: string; matchedCpcCodes?: string[] }) => ({
               externalPatentNumber: r.patentNumber,
               title: r.title,
               abstract: r.abstract || undefined,
@@ -253,6 +440,8 @@ export function PriorArtClient({
               filingDate: r.filingDate || undefined,
               sourceApi: r.sourceApi,
               externalUrl: r.externalUrl || undefined,
+              matchedQuery: r.matchedQuery,
+              matchedCpcCodes: r.matchedCpcCodes,
             }))
           );
         } catch {
@@ -585,13 +774,308 @@ export function PriorArtClient({
             <span className="font-medium text-foreground">{patent.title}</span>
           </p>
         </div>
-        {idsCount > 0 && (
-          <Badge className="text-sm px-3 py-1">
-            <FileText className="h-3.5 w-3.5 mr-1" />
-            {idsCount} added to IDS
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {idsCount > 0 && (
+            <Badge className="text-sm px-3 py-1">
+              <FileText className="h-3.5 w-3.5 mr-1" />
+              {idsCount} added to IDS
+            </Badge>
+          )}
+        </div>
       </div>
+
+      {/* Research Tools */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="h-4 w-4" />
+            Research Tools
+          </CardTitle>
+          <CardDescription>
+            Generate AI-powered keyword groups and CPC search matrices to guide your prior art search.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={handleGenerateKeywords}
+              disabled={generatingKeywords}
+              className="gap-2"
+            >
+              {generatingKeywords ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Tag className="h-4 w-4" />
+              )}
+              Generate Keywords
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleGenerateMatrix}
+              disabled={generatingMatrix}
+              className="gap-2"
+            >
+              {generatingMatrix ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Grid3X3 className="h-4 w-4" />
+              )}
+              Generate Search Matrix
+            </Button>
+            {searchMatrix && (
+              <a
+                href={`/api/export/search-matrix?patentId=${patent.id}`}
+                download
+              >
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" />
+                  Export Matrix (DOCX)
+                </Button>
+              </a>
+            )}
+          </div>
+
+          {/* CPC Filter Bar */}
+          {patentCpcCodes.length > 0 && (
+            <div>
+              <span className="text-xs text-muted-foreground font-medium block mb-2">
+                CPC Filters (click to toggle):
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {patentCpcCodes.map((code) => (
+                  <Badge
+                    key={code}
+                    variant={activeCpcFilters.has(code) ? "default" : "outline"}
+                    className="cursor-pointer text-xs px-2 py-0.5 transition-colors"
+                    onClick={() => toggleCpcFilter(code)}
+                  >
+                    {code}
+                    {activeCpcFilters.has(code) && (
+                      <X className="h-3 w-3 ml-1" />
+                    )}
+                  </Badge>
+                ))}
+                {searchMatrix?.cpcEntries
+                  ?.filter((e) => !patentCpcCodes.includes(e.cpcCode))
+                  .map((e) => (
+                    <Badge
+                      key={e.cpcCode}
+                      variant={activeCpcFilters.has(e.cpcCode) ? "default" : "secondary"}
+                      className="cursor-pointer text-xs px-2 py-0.5 transition-colors"
+                      onClick={() => toggleCpcFilter(e.cpcCode)}
+                    >
+                      {e.cpcCode} (suggested)
+                      {activeCpcFilters.has(e.cpcCode) && (
+                        <X className="h-3 w-3 ml-1" />
+                      )}
+                    </Badge>
+                  ))}
+                {activeCpcFilters.size > 0 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs px-2"
+                    onClick={() => setActiveCpcFilters(new Set())}
+                  >
+                    Clear all
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Keyword Groups Panel */}
+          {keywordGroups.length > 0 && (
+            <Collapsible open={keywordsOpen} onOpenChange={setKeywordsOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-2 w-full justify-between">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <Tag className="h-3.5 w-3.5" />
+                    Keyword Groups ({keywordGroups.length})
+                    {selectedKeywordGroups.size > 0 && (
+                      <Badge variant="secondary" className="text-xs">
+                        {selectedKeywordGroups.size} active
+                      </Badge>
+                    )}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${keywordsOpen ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2 space-y-2">
+                {keywordGroups.map((group, idx) => (
+                  <div
+                    key={idx}
+                    className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                      selectedKeywordGroups.has(idx) ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+                    }`}
+                    onClick={() => toggleKeywordGroup(idx)}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium">{group.category}</span>
+                      <Checkbox
+                        checked={selectedKeywordGroups.has(idx)}
+                        onCheckedChange={() => toggleKeywordGroup(idx)}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-2">{group.description}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {group.keywords.slice(0, 8).map((kw) => (
+                        <Badge
+                          key={kw}
+                          variant="secondary"
+                          className="text-xs cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setQuery((prev) => (prev ? `${prev} ${kw}` : kw));
+                          }}
+                        >
+                          {kw}
+                        </Badge>
+                      ))}
+                      {group.keywords.length > 8 && (
+                        <span className="text-xs text-muted-foreground">
+                          +{group.keywords.length - 8} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+
+          {/* Search Matrix Panel */}
+          {searchMatrix && (
+            <Collapsible open={matrixOpen} onOpenChange={setMatrixOpen}>
+              <CollapsibleTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-2 w-full justify-between">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    <Grid3X3 className="h-3.5 w-3.5" />
+                    CPC Search Matrix ({searchMatrix.cpcEntries.length} entries)
+                  </span>
+                  <ChevronDown className={`h-4 w-4 transition-transform ${matrixOpen ? "rotate-180" : ""}`} />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="pt-2">
+                <div className="rounded-md border overflow-auto max-h-96">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-28">CPC Code</TableHead>
+                        <TableHead className="w-48">Focus</TableHead>
+                        <TableHead>Keywords</TableHead>
+                        <TableHead className="w-20">Rank</TableHead>
+                        <TableHead className="w-24">Action</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {searchMatrix.cpcEntries
+                        .sort((a, b) => b.relevanceRanking - a.relevanceRanking)
+                        .map((entry, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell>
+                              <Badge
+                                variant={activeCpcFilters.has(entry.cpcCode) ? "default" : "outline"}
+                                className="cursor-pointer font-mono text-xs"
+                                onClick={() => toggleCpcFilter(entry.cpcCode)}
+                              >
+                                {entry.cpcCode}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs">{entry.plainEnglishFocus}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {entry.keywords.slice(0, 4).map((kw) => (
+                                  <Badge key={kw} variant="secondary" className="text-xs">
+                                    {kw}
+                                  </Badge>
+                                ))}
+                                {entry.keywords.length > 4 && (
+                                  <span className="text-xs text-muted-foreground">
+                                    +{entry.keywords.length - 4}
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-mono text-xs font-medium">
+                                {entry.relevanceRanking}/10
+                              </span>
+                            </TableCell>
+                            <TableCell>
+                              {entry.starterQueries.length > 0 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-xs"
+                                  onClick={() => useQueryFromMatrix(entry.starterQueries[0])}
+                                >
+                                  Use
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                </div>
+
+                {searchMatrix.combinedQueries.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-xs font-medium text-muted-foreground block mb-2">
+                      Combined Queries:
+                    </span>
+                    <div className="space-y-1.5">
+                      {searchMatrix.combinedQueries.map((cq, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center justify-between border rounded-md px-3 py-2 hover:bg-muted/50 cursor-pointer"
+                          onClick={() => useQueryFromMatrix(cq.queryString)}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{cq.description}</p>
+                            <p className="text-xs text-muted-foreground font-mono truncate">{cq.queryString}</p>
+                          </div>
+                          <Button variant="ghost" size="sm" className="h-6 text-xs shrink-0 ml-2">
+                            Use
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {searchMatrix.priorArtRiskAreas.length > 0 && (
+                  <div className="mt-3">
+                    <span className="text-xs font-medium text-muted-foreground block mb-2">
+                      Prior Art Risk Areas:
+                    </span>
+                    <div className="space-y-1.5">
+                      {searchMatrix.priorArtRiskAreas.map((area, idx) => (
+                        <div key={idx} className="border rounded-md px-3 py-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <AlertTriangle className="h-3 w-3 text-amber-500" />
+                            <span className="text-xs font-medium">{area.area}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{area.description}</p>
+                          <div className="flex gap-1 mt-1">
+                            {area.likelyCpcCodes.map((code) => (
+                              <Badge key={code} variant="outline" className="text-xs">
+                                {code}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Search Bar */}
       <Card>
@@ -646,6 +1130,14 @@ export function PriorArtClient({
               />
               <span className="text-sm">EPO OPS (Worldwide)</span>
             </label>
+            {(activeCpcFilters.size > 0 || selectedKeywordGroups.size > 0) && (
+              <span className="text-xs text-primary font-medium ml-auto">
+                {activeCpcFilters.size > 0 && `${activeCpcFilters.size} CPC filter(s)`}
+                {activeCpcFilters.size > 0 && selectedKeywordGroups.size > 0 && " + "}
+                {selectedKeywordGroups.size > 0 && `${selectedKeywordGroups.size} keyword group(s)`}
+                {" active"}
+              </span>
+            )}
           </div>
           {searchError && (
             <p className="mt-3 text-sm text-destructive">{searchError}</p>
