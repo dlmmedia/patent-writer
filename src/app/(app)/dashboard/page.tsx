@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, FileText, Clock, CheckCircle2, PenLine, ArrowRight } from "lucide-react";
+import { Plus, FileText, Clock, CheckCircle2, PenLine, ArrowRight, ExternalLink, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +76,26 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20">
+        <CardContent className="flex items-center gap-4 py-4">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-900/50 shrink-0">
+            <Shield className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">USPTO Account</p>
+            <p className="text-xs text-muted-foreground">
+              Sign in to access prior art search results and view patent documents on USPTO
+            </p>
+          </div>
+          <Button asChild variant="outline" size="sm" className="gap-2 shrink-0">
+            <a href="https://account.uspto.gov" target="_blank" rel="noopener noreferrer">
+              Sign in to USPTO
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

@@ -26,6 +26,7 @@ const GENERATION_ORDER = [
   "field_of_invention",
   "background",
   "summary",
+  "brief_description_drawings",
   "claims",
   "detailed_description",
   "abstract",

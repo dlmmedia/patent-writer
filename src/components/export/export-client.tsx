@@ -66,16 +66,18 @@ type SectionStatus = {
 };
 
 function getSectionStatuses(patent: PatentWithRelations): SectionStatus[] {
-  return SECTION_ORDER.map((type) => {
-    const section = patent.sections.find((s) => s.sectionType === type);
-    const hasContent = !!section?.plainText?.trim();
-    return {
-      type,
-      label: SECTION_LABELS[type],
-      complete: hasContent,
-      wordCount: section?.wordCount || 0,
-    };
-  });
+  return SECTION_ORDER
+    .filter((type) => type !== "claims")
+    .map((type) => {
+      const section = patent.sections.find((s) => s.sectionType === type);
+      const hasContent = !!section?.plainText?.trim();
+      return {
+        type,
+        label: SECTION_LABELS[type],
+        complete: hasContent,
+        wordCount: section?.wordCount || 0,
+      };
+    });
 }
 
 function getCompleteness(patent: PatentWithRelations): number {
@@ -88,7 +90,6 @@ function getCompleteness(patent: PatentWithRelations): number {
 }
 
 const CRITICAL_SECTIONS: SectionType[] = [
-  "claims",
   "abstract",
   "detailed_description",
   "summary",

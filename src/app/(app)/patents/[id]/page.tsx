@@ -32,6 +32,7 @@ import {
   MessageSquare,
   Link2,
   ClipboardCheck,
+  Settings2,
 } from "lucide-react";
 
 const SECTION_WORD_TARGETS: Partial<Record<SectionType, number>> = {
@@ -374,6 +375,12 @@ export default async function PatentOverviewPage({
                 <Button variant="outline" className="w-full gap-2" size="sm">
                   <Download className="h-4 w-4" />
                   Export
+                </Button>
+              </Link>
+              <Link href={`/patents/${id}/config`} className="col-span-2">
+                <Button variant="outline" className="w-full gap-2" size="sm">
+                  <Settings2 className="h-4 w-4" />
+                  Configuration
                 </Button>
               </Link>
             </CardContent>

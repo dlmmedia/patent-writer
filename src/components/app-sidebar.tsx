@@ -23,6 +23,10 @@ import {
   Plus,
   Scale,
   Sparkles,
+  Settings2,
+  FileEdit,
+  Image,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,8 +39,24 @@ const navItems = [
   { title: "Settings", href: "/settings", icon: Settings },
 ];
 
+const patentNavItems = [
+  { title: "Overview", href: "", icon: LayoutDashboard },
+  { title: "Editor", href: "/editor", icon: FileEdit },
+  { title: "Claims", href: "/claims", icon: Scale },
+  { title: "Drawings", href: "/drawings", icon: Image },
+  { title: "Prior Art", href: "/prior-art", icon: Search },
+  { title: "Export", href: "/export", icon: Download },
+  { title: "Configuration", href: "/config", icon: Settings2 },
+];
+
+function getPatentId(pathname: string): string | null {
+  const match = pathname.match(/\/patents\/([0-9a-f]{8}-[0-9a-f-]+)/);
+  return match ? match[1] : null;
+}
+
 export function AppSidebar() {
   const pathname = usePathname();
+  const patentId = getPatentId(pathname);
 
   return (
     <Sidebar>
@@ -102,6 +122,42 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {patentId && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70">
+              Current Patent
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {patentNavItems.map((item) => {
+                  const href = `/patents/${patentId}${item.href}`;
+                  const isActive = item.href === ""
+                    ? pathname === `/patents/${patentId}`
+                    : pathname.startsWith(href);
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive}
+                        className={`transition-all duration-200 ${
+                          isActive
+                            ? "border-l-[3px] border-l-[oklch(0.72_0.12_85)] rounded-l-none font-medium"
+                            : "hover:translate-x-0.5"
+                        }`}
+                      >
+                        <Link href={href}>
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.title}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="border-t px-4 py-3">

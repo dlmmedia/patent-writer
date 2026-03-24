@@ -17,6 +17,7 @@ import {
   Search,
   LayoutTemplate,
   Settings,
+  Settings2,
   Plus,
   Scale,
   Cpu,
@@ -126,6 +127,10 @@ export function CommandPalette() {
               <CommandItem onSelect={() => navigate(`/patents/${currentPatentId}/prior-art`)}>
                 <Search className="mr-2 h-4 w-4" />
                 Open Prior Art
+              </CommandItem>
+              <CommandItem onSelect={() => navigate(`/patents/${currentPatentId}/config`)}>
+                <Settings2 className="mr-2 h-4 w-4" />
+                Open Configuration
               </CommandItem>
             </CommandGroup>
           </>
