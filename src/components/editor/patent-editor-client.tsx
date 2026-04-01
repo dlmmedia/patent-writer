@@ -1057,7 +1057,8 @@ export function PatentEditorClient({
 
             {/* Errors */}
             {(sectionStates.some((s) => s.status === "error" && s.error) ||
-              figureStates.some((f) => f.status === "error" && f.error)) && (
+              figureStates.some((f) => f.status === "error" && f.error) ||
+              figurePhase === "error") && (
               <div className="mt-2 rounded-md bg-destructive/10 px-3 py-2">
                 <p className="text-[11px] font-medium text-destructive mb-1">
                   Errors:
@@ -1074,6 +1075,11 @@ export function PatentEditorClient({
                       : {s.error}
                     </p>
                   ))}
+                {figurePhase === "error" && figureStates.length === 0 && (
+                  <p className="text-[10px] text-destructive/80">
+                    Figure analysis failed. Check that your AI API keys are configured in Settings.
+                  </p>
+                )}
                 {figureStates
                   .filter((f) => f.status === "error" && f.error)
                   .map((f) => (
@@ -1084,6 +1090,12 @@ export function PatentEditorClient({
                       FIG. {f.figureNumber} ({f.label}): {f.error}
                     </p>
                   ))}
+                {(figureStates.some((f) => f.error?.toLowerCase().includes("api key")) ||
+                  sectionStates.some((s) => s.error?.toLowerCase().includes("api key"))) && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    One or more API keys are not configured. Go to Settings to add your keys.
+                  </p>
+                )}
               </div>
             )}
           </div>

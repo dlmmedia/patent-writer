@@ -48,6 +48,8 @@ import {
   ZoomIn,
   Trash2,
   Archive,
+  Upload,
+  ImagePlus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -111,6 +113,10 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
   const [genType, setGenType] = useState<DrawingType>("block_diagram");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
+  const [referenceImagePreview, setReferenceImagePreview] = useState<string | null>(null);
 
   // Drawing details editing
   const [editFigureNumber, setEditFigureNumber] = useState("");
@@ -122,6 +128,35 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
   const [newNumeralDesc, setNewNumeralDesc] = useState("");
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
+  const refImageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleReferenceImageUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!file.type.startsWith("image/")) {
+        toast.error("Please upload an image file (PNG, JPG, or WebP).");
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error("Reference image must be under 10 MB.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        setReferenceImagePreview(dataUrl);
+        const base64 = dataUrl.split(",")[1];
+        setReferenceImageBase64(base64);
+      };
+      reader.readAsDataURL(file);
+
+      if (refImageInputRef.current) refImageInputRef.current.value = "";
+    },
+    []
+  );
 
   const nextNumeral = useCallback(() => {
     if (numerals.length === 0) return 100;
@@ -165,15 +200,22 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
 
     setIsGenerating(true);
     setGeneratedImage(null);
+    setGeneratedImageUrl(null);
+    setGenerationError(null);
 
     try {
       const typeLabel = DRAWING_TYPE_LABELS[genType];
       const prompt = `${typeLabel} showing: ${genDescription}`;
 
+      const body: Record<string, unknown> = { prompt, model: genModel };
+      if (referenceImageBase64) {
+        body.referenceImage = referenceImageBase64;
+      }
+
       const res = await fetch("/api/ai/images", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, model: genModel }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
@@ -183,14 +225,16 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
       }
 
       setGeneratedImage(`data:image/png;base64,${data.image}`);
+      setGeneratedImageUrl(data.url);
       toast.success("Drawing generated successfully!");
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Unknown error";
+      setGenerationError(msg);
       toast.error(`Failed to generate drawing: ${msg}`);
     } finally {
       setIsGenerating(false);
     }
-  }, [genDescription, genModel, genType]);
+  }, [genDescription, genModel, genType, referenceImageBase64]);
 
   const [isAccepting, setIsAccepting] = useState(false);
 
@@ -206,7 +250,7 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
         figureNumber: figNum,
         figureLabel: genDescription.slice(0, 80),
         description: genDescription,
-        originalUrl: generatedImage,
+        originalUrl: generatedImageUrl || generatedImage,
         annotations: { numerals: [], arrows: [] },
         generationPrompt: genDescription,
         generationModel: genModel,
@@ -219,7 +263,10 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
       setDrawings((prev) => [...prev, saved]);
       setGenerateOpen(false);
       setGeneratedImage(null);
+      setGeneratedImageUrl(null);
       setGenDescription("");
+      setReferenceImageBase64(null);
+      setReferenceImagePreview(null);
       handleSelectDrawing(saved);
       toast.success(`FIG. ${figNum} saved to patent.`);
     } catch {
@@ -229,6 +276,7 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
     }
   }, [
     generatedImage,
+    generatedImageUrl,
     genDescription,
     genModel,
     nextFigureNumber,
@@ -444,7 +492,13 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
               {isExportingZip ? "Exporting..." : "Export All (ZIP)"}
             </Button>
           )}
-          <Dialog open={generateOpen} onOpenChange={setGenerateOpen}>
+          <Dialog open={generateOpen} onOpenChange={(open) => {
+              setGenerateOpen(open);
+              if (!open) {
+                setReferenceImageBase64(null);
+                setReferenceImagePreview(null);
+              }
+            }}>
             <DialogTrigger asChild>
               <Button>
                 <Plus className="h-4 w-4 mr-2" />
@@ -518,12 +572,72 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Reference Image (optional)</Label>
+                  {referenceImagePreview ? (
+                    <div className="relative rounded-lg border overflow-hidden">
+                      <img
+                        src={referenceImagePreview}
+                        alt="Reference"
+                        className="w-full max-h-40 object-contain bg-muted"
+                      />
+                      <button
+                        onClick={() => {
+                          setReferenceImageBase64(null);
+                          setReferenceImagePreview(null);
+                        }}
+                        className="absolute top-2 right-2 bg-background/80 rounded-full p-1 hover:bg-destructive hover:text-destructive-foreground transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                      <div className="absolute bottom-2 left-2">
+                        <Badge variant="secondary" className="text-[10px]">
+                          <ImagePlus className="h-3 w-3 mr-1" />
+                          Reference attached
+                        </Badge>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="cursor-pointer">
+                      <div className="flex items-center justify-center gap-2 rounded-lg border border-dashed px-4 py-3 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors">
+                        <Upload className="h-4 w-4" />
+                        Upload a reference image
+                      </div>
+                      <input
+                        ref={refImageInputRef}
+                        type="file"
+                        className="hidden"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleReferenceImageUpload}
+                      />
+                    </label>
+                  )}
+                  <p className="text-[11px] text-muted-foreground">
+                    Upload an image to guide the AI in generating a similar-style drawing.
+                  </p>
+                </div>
+
                 {isGenerating && (
                   <div className="space-y-3">
                     <Skeleton className="w-full aspect-square rounded-lg" />
                     <p className="text-sm text-muted-foreground text-center">
                       Generating drawing...
                     </p>
+                  </div>
+                )}
+
+                {generationError && !isGenerating && !generatedImage && (
+                  <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
+                    <p className="text-sm font-medium text-destructive flex items-center gap-2">
+                      <X className="h-4 w-4" />
+                      Drawing generation failed
+                    </p>
+                    <p className="text-xs text-destructive/80">{generationError}</p>
+                    {generationError.toLowerCase().includes("api key") && (
+                      <p className="text-xs text-muted-foreground">
+                        Check your API keys in Settings. The selected model requires a valid key.
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -549,7 +663,10 @@ export function DrawingStudioClient({ patent }: DrawingStudioClientProps) {
                     <Button
                       variant="outline"
                       className="flex-1"
-                      onClick={() => setGeneratedImage(null)}
+                      onClick={() => {
+                        setGeneratedImage(null);
+                        setGeneratedImageUrl(null);
+                      }}
                     >
                       <X className="h-4 w-4 mr-2" />
                       Discard

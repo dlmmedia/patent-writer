@@ -1,17 +1,21 @@
 import { NextRequest } from "next/server";
-import { PDFParse } from "pdf-parse";
 import { db } from "@/lib/db";
 import { patentDocuments } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 
+export const maxDuration = 60;
+
 async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   try {
+    const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     const result = await parser.getText();
     return result.text || "";
   } catch (err) {
     console.error("PDF parsing error:", err);
-    throw new Error("Failed to parse PDF file");
+    throw new Error(
+      "Failed to parse PDF file. The file may be corrupted, password-protected, or contain only scanned images."
+    );
   }
 }
 
@@ -22,7 +26,9 @@ async function extractTextFromDOCX(buffer: Buffer): Promise<string> {
     return result.value || "";
   } catch (err) {
     console.error("DOCX parsing error:", err);
-    throw new Error("Failed to parse DOCX file");
+    throw new Error(
+      "Failed to parse DOCX file. The file may be corrupted or in an unsupported format."
+    );
   }
 }
 
@@ -53,7 +59,7 @@ async function extractText(
   }
 
   throw new Error(
-    `Unsupported file type: ${ext || mimeType}. Supported: PDF, DOCX, TXT, MD`
+    `Unsupported file type: .${ext || "unknown"} (${mimeType}). Supported formats: PDF, DOCX, TXT, MD, CSV, JSON, XML.`
   );
 }
 
@@ -61,7 +67,17 @@ const MAX_TEXT_LENGTH = 100_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const formData = await req.formData();
+    let formData: FormData;
+    try {
+      formData = await req.formData();
+    } catch (err) {
+      console.error("FormData parse error:", err);
+      return Response.json(
+        { error: "Failed to read upload. The file may be too large (max 20 MB)." },
+        { status: 400 }
+      );
+    }
+
     const file = formData.get("file") as File | null;
     const patentId = formData.get("patentId") as string | null;
 
@@ -75,10 +91,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const maxSize = 20 * 1024 * 1024; // 20MB
+    const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
       return Response.json(
-        { error: "File too large. Maximum size is 20MB." },
+        { error: "File too large. Maximum size is 20 MB." },
         { status: 400 }
       );
     }
@@ -86,7 +102,13 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    let extractedText = await extractText(buffer, file.name, file.type);
+    let extractedText: string;
+    try {
+      extractedText = await extractText(buffer, file.name, file.type);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to extract text";
+      return Response.json({ error: message }, { status: 422 });
+    }
 
     if (extractedText.length > MAX_TEXT_LENGTH) {
       extractedText = extractedText.slice(0, MAX_TEXT_LENGTH);

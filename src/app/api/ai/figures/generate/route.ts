@@ -11,6 +11,7 @@ import {
 import { db } from "@/lib/db";
 import { patentDrawings, referenceNumerals } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { uploadImageToBlob } from "@/lib/blob";
 
 interface FigureSpec {
   figureNumber: string;
@@ -145,7 +146,14 @@ export async function POST(req: Request) {
             }
 
             const { image } = await generateImage(generateOptions);
-            const dataUrl = `data:image/png;base64,${image.base64}`;
+
+            let imageUrl: string;
+            try {
+              const filename = `fig-${figure.figureNumber}-${Date.now()}.png`;
+              imageUrl = await uploadImageToBlob(image.base64, filename);
+            } catch {
+              imageUrl = `data:image/png;base64,${image.base64}`;
+            }
 
             const [drawing] = await db
               .insert(patentDrawings)
@@ -154,7 +162,7 @@ export async function POST(req: Request) {
                 figureNumber: figure.figureNumber,
                 figureLabel: figure.label,
                 description: figure.description,
-                originalUrl: dataUrl,
+                originalUrl: imageUrl,
                 generationPrompt: prompt,
                 generationModel: modelId,
                 width: 1024,

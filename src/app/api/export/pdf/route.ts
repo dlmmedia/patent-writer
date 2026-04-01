@@ -81,16 +81,10 @@ export async function GET(request: NextRequest) {
       preamble: c.preamble ? sanitizeText(c.preamble) : c.preamble,
       body: c.body ? sanitizeText(c.body) : c.body,
     })),
-    drawings: patent.drawings.map((d) => {
-      const url = d.processedUrl || d.originalUrl;
-      if (url && url.length > 2_000_000) {
-        return { ...d, originalUrl: null, processedUrl: null };
-      }
-      return {
-        ...d,
-        figureLabel: sanitizeText(d.figureLabel),
-      };
-    }),
+    drawings: patent.drawings.map((d) => ({
+      ...d,
+      figureLabel: sanitizeText(d.figureLabel),
+    })),
   };
 
   try {

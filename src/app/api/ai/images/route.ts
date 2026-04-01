@@ -6,10 +6,11 @@ import {
   isGoogleImageModel,
   isOpenAIImageModel,
 } from "@/lib/ai/providers";
+import { uploadImageToBlob } from "@/lib/blob";
 
 export async function POST(req: Request) {
   try {
-    const { prompt, model } = await req.json();
+    const { prompt, model, referenceImage } = await req.json();
 
     if (!prompt) {
       return Response.json(
@@ -41,7 +42,11 @@ export async function POST(req: Request) {
 
     const imageModel = getImageModel(modelId);
 
-    const fullPrompt = `Patent drawing in black and white line art style. Clean technical illustration with numbered reference elements. No shading or color. Precise engineering-style lines. ${prompt}`;
+    let fullPrompt = `Patent drawing in black and white line art style. Clean technical illustration with numbered reference elements. No shading or color. Precise engineering-style lines. ${prompt}`;
+
+    if (referenceImage) {
+      fullPrompt += ` Use the provided reference image as a visual guide for layout, structure, and style.`;
+    }
 
     const generateOptions: Parameters<typeof generateImage>[0] = {
       model: imageModel,
@@ -55,9 +60,26 @@ export async function POST(req: Request) {
       generateOptions.aspectRatio = "1:1";
     }
 
+    if (referenceImage) {
+      generateOptions.providerOptions = {
+        openai: { input: [referenceImage] },
+      };
+    }
+
     const { image } = await generateImage(generateOptions);
 
-    return Response.json({ image: image.base64 });
+    let url: string | undefined;
+    try {
+      const filename = `drawing-${Date.now()}.png`;
+      url = await uploadImageToBlob(image.base64, filename);
+    } catch (blobErr) {
+      console.error("Blob upload failed, returning base64 data URL:", blobErr);
+    }
+
+    return Response.json({
+      image: image.base64,
+      url: url ?? `data:image/png;base64,${image.base64}`,
+    });
   } catch (error) {
     console.error("Image generation error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";

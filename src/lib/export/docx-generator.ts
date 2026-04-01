@@ -128,7 +128,11 @@ function detectImageType(buf: Buffer): "png" | "jpg" | "gif" | "bmp" {
 
 async function fetchImageSafe(url: string): Promise<Buffer | null> {
   try {
-    if (url.length > 2_000_000) return null;
+    if (url.startsWith("data:")) {
+      const base64 = url.split(",")[1];
+      if (!base64) return null;
+      return Buffer.from(base64, "base64");
+    }
     const res = await fetch(url);
     if (!res.ok) return null;
     return Buffer.from(await res.arrayBuffer());

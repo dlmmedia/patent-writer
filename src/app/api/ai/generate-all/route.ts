@@ -19,6 +19,7 @@ import { patents, patentSections, patentClaims, patentDocuments, patentDrawings,
 import { eq, asc, desc } from "drizzle-orm";
 import { figureAnalysisSchema } from "@/app/api/ai/figures/analyze/route";
 import type { KeyFeature, IntakeQA } from "@/lib/db/schema";
+import { uploadImageToBlob } from "@/lib/blob";
 
 const GENERATION_ORDER = [
   "title",
@@ -434,7 +435,14 @@ export async function POST(req: Request) {
                     }
 
                     const { image } = await generateImage(generateOptions);
-                    const dataUrl = `data:image/png;base64,${image.base64}`;
+
+                    let imageUrl: string;
+                    try {
+                      const filename = `fig-${figure.figureNumber}-${Date.now()}.png`;
+                      imageUrl = await uploadImageToBlob(image.base64, filename);
+                    } catch {
+                      imageUrl = `data:image/png;base64,${image.base64}`;
+                    }
 
                     const [drawing] = await db
                       .insert(patentDrawings)
@@ -443,7 +451,7 @@ export async function POST(req: Request) {
                         figureNumber: figure.figureNumber,
                         figureLabel: figure.label,
                         description: figure.description,
-                        originalUrl: dataUrl,
+                        originalUrl: imageUrl,
                         generationPrompt: prompt,
                         generationModel: imgModelId,
                         width: 1024,
