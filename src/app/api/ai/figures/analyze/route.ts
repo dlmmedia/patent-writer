@@ -12,20 +12,13 @@ import { db } from "@/lib/db";
 import { patents, patentSections } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 
+import { DRAWING_TYPES } from "@/lib/ai/drawing-prompts";
+
 export const figureAnalysisSchema = z.object({
   figures: z.array(
     z.object({
       figureNumber: z.string(),
-      figureType: z.enum([
-        "block_diagram",
-        "flowchart",
-        "system_architecture",
-        "data_flow",
-        "perspective_view",
-        "cross_section",
-        "detail_view",
-        "ui_mockup",
-      ]),
+      figureType: z.enum(DRAWING_TYPES as unknown as [string, ...string[]]),
       label: z.string(),
       description: z.string(),
       referenceNumerals: z.array(

@@ -222,6 +222,7 @@ export const patentDrawings = pgTable("patent_drawings", {
     .references(() => patents.id, { onDelete: "cascade" }),
   figureNumber: varchar("figure_number", { length: 10 }).notNull(),
   figureLabel: text("figure_label").notNull(),
+  figureType: varchar("figure_type", { length: 40 }),
   description: text("description"),
   originalUrl: text("original_url"),
   processedUrl: text("processed_url"),
@@ -232,6 +233,10 @@ export const patentDrawings = pgTable("patent_drawings", {
   }>(),
   generationPrompt: text("generation_prompt"),
   generationModel: text("generation_model"),
+  sortOrder: integer("sort_order").default(0),
+  previousVersions: jsonb("previous_versions").$type<
+    { url: string; prompt: string; model: string; createdAt: string }[]
+  >(),
   width: integer("width"),
   height: integer("height"),
   dpi: integer("dpi").default(300),

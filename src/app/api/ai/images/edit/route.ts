@@ -7,57 +7,61 @@ import {
   isOpenAIImageModel,
 } from "@/lib/ai/providers";
 import { uploadImageToBlob } from "@/lib/blob";
-import { buildSimplePrompt, type DrawingType } from "@/lib/ai/drawing-prompts";
+import { buildEditPrompt } from "@/lib/ai/drawing-prompts";
 
 export async function POST(req: Request) {
   try {
-    const { prompt, model, referenceImage, figureType } = await req.json();
+    const { sourceImage, editPrompt, model, originalDescription } =
+      await req.json();
 
-    if (!prompt) {
+    if (!sourceImage) {
       return Response.json(
-        { error: "A prompt is required to generate an image." },
+        { error: "A source image (base64) is required." },
+        { status: 400 }
+      );
+    }
+    if (!editPrompt) {
+      return Response.json(
+        { error: "An edit prompt is required." },
         { status: 400 }
       );
     }
 
-    const modelId = (model || "nano-banana-2") as ImageModelId;
+    const modelId = (model || "gpt-image-1") as ImageModelId;
     if (!(modelId in IMAGE_MODEL_PROVIDER_MAP)) {
       return Response.json(
-        { error: `Invalid image model "${model}". Valid models: ${Object.keys(IMAGE_MODEL_PROVIDER_MAP).join(", ")}` },
+        {
+          error: `Invalid image model "${model}". Valid models: ${Object.keys(IMAGE_MODEL_PROVIDER_MAP).join(", ")}`,
+        },
         { status: 400 }
       );
     }
 
     if (isOpenAIImageModel(modelId) && !process.env.OPENAI_API_KEY) {
       return Response.json(
-        { error: "OpenAI API key is not configured. Go to Settings to check your API keys." },
+        { error: "OpenAI API key is not configured." },
         { status: 400 }
       );
     }
-    if (isGoogleImageModel(modelId) && !process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    if (
+      isGoogleImageModel(modelId) &&
+      !process.env.GOOGLE_GENERATIVE_AI_API_KEY
+    ) {
       return Response.json(
-        { error: "Google AI API key is not configured. Go to Settings to check your API keys." },
+        { error: "Google AI API key is not configured." },
         { status: 400 }
       );
     }
 
     const imageModel = getImageModel(modelId);
-
-    const fType = (figureType || "block_diagram") as DrawingType;
-    const fullPrompt = buildSimplePrompt(fType, prompt, {
-      referenceImage: !!referenceImage,
-    });
-
-    const refImageBuffer = referenceImage
-      ? Buffer.from(referenceImage, "base64")
-      : null;
+    const fullPrompt = buildEditPrompt(editPrompt, originalDescription);
+    const sourceBuffer = Buffer.from(sourceImage, "base64");
 
     const generateOptions: Parameters<typeof generateImage>[0] = {
       model: imageModel,
-      prompt:
-        referenceImage && isOpenAIImageModel(modelId) && refImageBuffer
-          ? { text: fullPrompt, images: [refImageBuffer] }
-          : fullPrompt,
+      prompt: isOpenAIImageModel(modelId)
+        ? { text: fullPrompt, images: [sourceBuffer] }
+        : fullPrompt,
       abortSignal: AbortSignal.timeout(120_000),
     };
 
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
 
     let url: string | undefined;
     try {
-      const filename = `drawing-${Date.now()}.png`;
+      const filename = `drawing-edit-${Date.now()}.png`;
       url = await uploadImageToBlob(image.base64, filename);
     } catch (blobErr) {
       console.error("Blob upload failed, returning base64 data URL:", blobErr);
@@ -82,10 +86,10 @@ export async function POST(req: Request) {
       url: url ?? `data:image/png;base64,${image.base64}`,
     });
   } catch (error) {
-    console.error("Image generation error:", error);
+    console.error("Image edit error:", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return Response.json(
-      { error: `Failed to generate image: ${message}` },
+      { error: `Failed to edit image: ${message}` },
       { status: 500 }
     );
   }

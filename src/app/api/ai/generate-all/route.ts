@@ -20,6 +20,7 @@ import { eq, asc, desc } from "drizzle-orm";
 import { figureAnalysisSchema } from "@/app/api/ai/figures/analyze/route";
 import type { KeyFeature, IntakeQA } from "@/lib/db/schema";
 import { uploadImageToBlob } from "@/lib/blob";
+import { buildImagePrompt as buildImagePromptShared } from "@/lib/ai/drawing-prompts";
 
 const GENERATION_ORDER = [
   "title",
@@ -461,14 +462,23 @@ export async function POST(req: Request) {
                       .returning();
 
                     if (figure.referenceNumerals.length > 0) {
-                      await db.insert(referenceNumerals).values(
-                        figure.referenceNumerals.map((rn) => ({
-                          patentId,
-                          numeral: rn.numeral,
-                          elementName: rn.elementName,
-                          firstFigureId: drawing.id,
-                        }))
+                      const existingNumerals = await db.query.referenceNumerals.findMany({
+                        where: eq(referenceNumerals.patentId, patentId),
+                      });
+                      const existingNums = new Set(existingNumerals.map((n) => n.numeral));
+                      const newNumerals = figure.referenceNumerals.filter(
+                        (rn) => !existingNums.has(rn.numeral)
                       );
+                      if (newNumerals.length > 0) {
+                        await db.insert(referenceNumerals).values(
+                          newNumerals.map((rn) => ({
+                            patentId,
+                            numeral: rn.numeral,
+                            elementName: rn.elementName,
+                            firstFigureId: drawing.id,
+                          }))
+                        );
+                      }
                     }
 
                     send("figure_complete", {
@@ -670,37 +680,4 @@ function extractErrorDetail(err: unknown): { message: string; statusCode?: numbe
   return { message: message.substring(0, 500), statusCode: e.statusCode };
 }
 
-function buildImagePrompt(figure: {
-  figureNumber: string;
-  figureType: string;
-  label: string;
-  description: string;
-  referenceNumerals: { numeral: number; elementName: string }[];
-}): string {
-  const typeLabels: Record<string, string> = {
-    block_diagram: "Block Diagram",
-    flowchart: "Flowchart",
-    system_architecture: "System Architecture Diagram",
-    data_flow: "Data Flow Diagram",
-    perspective_view: "Perspective View",
-    cross_section: "Cross-Section View",
-    detail_view: "Detail View",
-    ui_mockup: "User Interface Mockup",
-  };
-
-  const typeLabel = typeLabels[figure.figureType] || figure.figureType.replace(/_/g, " ");
-
-  let prompt = `Patent drawing in black and white line art style. Clean technical illustration with numbered reference elements. No shading or color. Precise engineering-style lines.`;
-  prompt += ` ${typeLabel} showing: ${figure.description}`;
-
-  if (figure.referenceNumerals.length > 0) {
-    const numeralList = figure.referenceNumerals
-      .map((rn) => `${rn.numeral} - ${rn.elementName}`)
-      .join(", ");
-    prompt += ` Include labeled reference numerals: ${numeralList}.`;
-  }
-
-  prompt += ` Title: FIG. ${figure.figureNumber} - ${figure.label}`;
-
-  return prompt;
-}
+const buildImagePrompt = buildImagePromptShared;

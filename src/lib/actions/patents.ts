@@ -45,7 +45,7 @@ export async function getPatent(id: string) {
     with: {
       sections: { orderBy: [asc(patentSections.orderIndex)] },
       claims: { orderBy: [asc(patentClaims.claimNumber)] },
-      drawings: { orderBy: [asc(patentDrawings.figureNumber)] },
+      drawings: { orderBy: [asc(patentDrawings.sortOrder), asc(patentDrawings.figureNumber)] },
       documents: true,
       referenceNumerals: { orderBy: [asc(referenceNumerals.numeral)] },
     },
@@ -217,7 +217,7 @@ export async function deleteClaim(id: string, patentId: string) {
 export async function getDrawings(patentId: string) {
   return db.query.patentDrawings.findMany({
     where: eq(patentDrawings.patentId, patentId),
-    orderBy: [asc(patentDrawings.figureNumber)],
+    orderBy: [asc(patentDrawings.sortOrder), asc(patentDrawings.figureNumber)],
   });
 }
 
@@ -254,6 +254,61 @@ export async function deleteAllDrawings(patentId: string) {
   revalidatePath(`/patents/${patentId}/drawings`);
 }
 
+export async function reorderDrawings(
+  patentId: string,
+  orderedIds: string[]
+) {
+  await Promise.all(
+    orderedIds.map((id, index) =>
+      db
+        .update(patentDrawings)
+        .set({ sortOrder: index, updatedAt: new Date() })
+        .where(eq(patentDrawings.id, id))
+    )
+  );
+  revalidatePath(`/patents/${patentId}/drawings`);
+}
+
+export async function duplicateDrawing(id: string) {
+  const original = await db.query.patentDrawings.findFirst({
+    where: eq(patentDrawings.id, id),
+  });
+  if (!original) throw new Error("Drawing not found");
+
+  const existing = await db.query.patentDrawings.findMany({
+    where: eq(patentDrawings.patentId, original.patentId),
+  });
+  const nums = existing
+    .map((d) => parseInt(d.figureNumber, 10))
+    .filter((n) => !isNaN(n));
+  const nextNum = nums.length > 0 ? String(Math.max(...nums) + 1) : "1";
+
+  const [duplicate] = await db
+    .insert(patentDrawings)
+    .values({
+      patentId: original.patentId,
+      figureNumber: nextNum,
+      figureLabel: `${original.figureLabel} (copy)`,
+      figureType: original.figureType,
+      description: original.description,
+      originalUrl: original.originalUrl,
+      processedUrl: original.processedUrl,
+      thumbnailUrl: original.thumbnailUrl,
+      annotations: original.annotations,
+      generationPrompt: original.generationPrompt,
+      generationModel: original.generationModel,
+      sortOrder: (original.sortOrder ?? 0) + 1,
+      width: original.width,
+      height: original.height,
+      dpi: original.dpi,
+      isCompliant: false,
+    })
+    .returning();
+
+  revalidatePath(`/patents/${original.patentId}/drawings`);
+  return duplicate;
+}
+
 export async function bulkCreateReferenceNumerals(
   patentId: string,
   numerals: { numeral: number; elementName: string; description?: string; firstFigureId?: string }[]
@@ -286,6 +341,50 @@ export async function createReferenceNumeral(data: {
     .values(data)
     .returning();
   return numeral;
+}
+
+export async function deleteReferenceNumeral(id: string, patentId: string) {
+  await db.delete(referenceNumerals).where(eq(referenceNumerals.id, id));
+  revalidatePath(`/patents/${patentId}/drawings`);
+}
+
+export async function updateReferenceNumeral(
+  id: string,
+  data: { elementName?: string; description?: string }
+) {
+  const [updated] = await db
+    .update(referenceNumerals)
+    .set(data)
+    .where(eq(referenceNumerals.id, id))
+    .returning();
+  return updated;
+}
+
+export async function deduplicateReferenceNumerals(patentId: string) {
+  const all = await db.query.referenceNumerals.findMany({
+    where: eq(referenceNumerals.patentId, patentId),
+    orderBy: [asc(referenceNumerals.numeral), asc(referenceNumerals.createdAt)],
+  });
+
+  const seen = new Map<number, string>();
+  const toDelete: string[] = [];
+
+  for (const n of all) {
+    if (seen.has(n.numeral)) {
+      toDelete.push(n.id);
+    } else {
+      seen.set(n.numeral, n.id);
+    }
+  }
+
+  if (toDelete.length > 0) {
+    for (const id of toDelete) {
+      await db.delete(referenceNumerals).where(eq(referenceNumerals.id, id));
+    }
+  }
+
+  revalidatePath(`/patents/${patentId}/drawings`);
+  return toDelete.length;
 }
 
 export async function getPriorArtResults(patentId: string) {
